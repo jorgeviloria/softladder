@@ -4,6 +4,9 @@
 
 **A modern ladder-logic / SFC PLC editor and runtime, written in Rust.**
 
+[![CI](https://github.com/jorgeviloria/softladder/actions/workflows/ci.yml/badge.svg)](https://github.com/jorgeviloria/softladder/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 An independent reimplementation of [ClassicLadder](https://github.com/MaVaTi56/classicladder) —
 same domain, better UX, better engineering, and your existing `.clprj` projects still work.
 
