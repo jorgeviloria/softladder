@@ -97,14 +97,17 @@ Emitted by the scan engine and `lint`, surfaced in the editor's Problems panel a
 | `SL-E007` | Error | Call to an undefined section, or to one that is not a subroutine |
 | `SL-E008` | Error | Subroutine call stack overflow |
 | `SL-E009` | Error | Two elements placed on the same cell |
+| `SL-E011` | Error | A section references a rung id that does not exist |
 | `SL-W001` | Warning | A live row cannot reach the left rail (unreachable branch) |
 | `SL-W002` | Warning | SFC section skipped (engine lands in M4) |
 | `SL-E010` | Error | A rung or section id is used twice |
 | `SL-W010` | Warning | The project has no rungs |
 | `SL-W011` | Warning | A rung is empty |
+| `SL-W020` | Warning | A simulation-bench widget addresses the wrong variable kind, or has an inverted range |
 
 `SL-E001`–`SL-E009` and `SL-W001`/`SL-W002` come from `softladder_core::lint` and the scan engine;
-`SL-E010`, `SL-W010` and `SL-W011` are project-level checks reported by `softladder lint`. A rung
+`SL-E010`, `SL-W010` and `SL-W011` are project-level checks reported by `softladder lint`; and
+`SL-W020` is produced by `softladder-edit` from `SimulationPanel::validate`. A rung
 with an `Error` diagnostic is marked in the editor; the rest of the scan continues.
 
 ## Legacy elements on import

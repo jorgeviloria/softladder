@@ -26,10 +26,11 @@ GTK windows.
 SoftLadder keeps what makes it valuable — the ladder/SFC semantics and the project format — and
 rebuilds everything around it:
 
-- **Editor** — canvas with pan/zoom, multi-selection, drag & drop, unlimited undo/redo, command
-  palette, inline variable editing with autocompletion, cross-references and rename-in-project.
-- **Simulation** — a built-in HMI panel (switches, buttons, LEDs, sliders) plus a time-series scope,
-  so you can commission the logic before touching hardware.
+- **Editor** — canvas with pan/zoom, element palette, inline variable editing with validation,
+  command-based unlimited undo/redo, and (from M3/M8) cross-references and rename-in-project.
+- **Simulation bench** — a panel of switches, push-buttons, lamps, sliders and gauges that is part of
+  the project, so you can commission the logic before touching hardware. The program's `%I`/`%Q`
+  variables are wired to the bench automatically.
 - **Testing** — `.sltest` scenarios assert outputs against a scripted input timeline and run in CI.
   Your PLC program finally gets unit tests.
 - **Runtime** — deterministic fixed-step scan, scan statistics and jitter measurement, flight
@@ -42,14 +43,24 @@ rebuilds everything around it:
 
 ## Status
 
-**M0 — repository skeleton.** The workspace compiles, CI runs, and the domain model, scan engine,
-project format and UI shell exist as a working skeleton. Feature milestones:
+**M2 complete — the editor works.** What you can do today:
+
+- open, edit and save ladder programs in the desktop editor, with unlimited undo/redo, an element
+  palette, variable validation, problems list and live power-flow indication
+  ([`docs/EDITOR.md`](docs/EDITOR.md));
+- run them on a simulation bench of switches, push-buttons, lamps, sliders and gauges that is saved
+  with the project, so logic can be commissioned before any hardware exists;
+- execute the same program headless and reproducibly (`softladder run` is deterministic by default);
+- rely on a deterministic scan engine with the full element set, jumps/subroutines and structured
+  diagnostics ([`docs/SEMANTICS.md`](docs/SEMANTICS.md));
+- keep programs in `.slprj` schema v2 — the ClassicLadder sub-value spellings (`%TM0.Q`, `%R0.I`,
+  `%MW0.3`) included — with a migration chain from v1.
 
 | Milestone | Scope |
 | --- | --- |
 | M0 ✅ | Repo, workspace, CI, plan, ADRs |
-| M1 | Core: variables, expressions, function blocks, scan engine, diagnostics |
-| M2 | egui editor MVP: edit/save rungs, undo/redo, simulation panel |
+| M1 ✅ | Core: variable accessors, expressions, function blocks, real power flow, diagnostics |
+| M2 ✅ | egui editor: element palette, undo/redo, simulation bench, problems, live power flow |
 | M3 | ClassicLadder import/export + golden corpus parity |
 | M4 | SFC/Grafcet model, engine and editor |
 | M5 | IO: simulator scripting, Modbus TCP master/slave, then RTU |
@@ -65,11 +76,16 @@ See [`docs/PLAN.md`](docs/PLAN.md) (Spanish) for the full plan, milestones and a
 ```bash
 # prerequisites: Rust stable (see rust-toolchain.toml)
 
-cargo test --workspace            # unit tests
-cargo run -p softladder-ui        # desktop editor (early skeleton)
-cargo run -p softladder-cli -- run examples/traffic_light.slprj --cycles 20
+cargo test --workspace            # unit tests (330+ tests)
+cargo run -p softladder-ui        # desktop editor (run it from the repo root)
+cargo run -p softladder-cli -- run examples/traffic_light.slprj --cycles 500   # deterministic
+cargo run -p softladder-cli -- run examples/traffic_light.slprj --real-time    # wall-clock pacing
+cargo run -p softladder-cli -- lint examples/traffic_light.slprj
 cargo run -p softladder-cli -- --help
 ```
+
+Runs are simulated by default: `now_ms` advances by exactly the scan period, so the same command
+produces byte-identical `--json` output. `--real-time` paces with the wall clock instead.
 
 Fetch the ClassicLadder example projects used by the compatibility tests (M3):
 
@@ -83,11 +99,12 @@ Fetch the ClassicLadder example projects used by the compatibility tests (M3):
 crates/softladder-core       domain model, expressions, scan engine, function blocks, SFC
 crates/softladder-project    .slprj format + ClassicLadder import/export
 crates/softladder-runtime    scheduler, run states, statistics, flight recorder
+crates/softladder-edit       editing commands, undo/redo history and the simulation bench
 crates/softladder-io         IoDriver trait + sim / Modbus / GPIO / HAL drivers
 crates/softladder-monitor    online protocol + web dashboard server
 crates/softladder-ui         egui/eframe editor (main binary)
 crates/softladder-cli        headless run / lint / import / export
-docs/                        plan, architecture, format, compatibility, ADRs
+docs/                        plan, semantics, architecture, format, compatibility, ADRs
 examples/                    sample projects and test scenarios
 testdata/                    golden corpus (fetched, not vendored)
 ```
@@ -97,6 +114,8 @@ testdata/                    golden corpus (fetched, not vendored)
 | Document | Contents |
 | --- | --- |
 | [`docs/PLAN.md`](docs/PLAN.md) | Vision, ClassicLadder inventory, differentiators, roadmap, risks (Spanish) |
+| [`docs/SEMANTICS.md`](docs/SEMANTICS.md) | Normative specification of ladder execution: power flow, every element, jumps/calls, diagnostics |
+| [`docs/EDITOR.md`](docs/EDITOR.md) | Editor UX contract: layout, keyboard shortcuts, simulation bench, live indication |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Crate boundaries, data flow, invariants, engineering conventions |
 | [`docs/FORMAT.md`](docs/FORMAT.md) | Native `.slprj` schema and migration rules |
 | [`docs/COMPAT.md`](docs/COMPAT.md) | ClassicLadder container/parts format, variable and element mapping |

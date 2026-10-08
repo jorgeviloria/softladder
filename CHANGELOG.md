@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — M2 editor
+
+### Added
+
+- `softladder-edit`: the editor's logic without a window — `Editor` (project +
+  bounded 1000-entry undo/redo history + dirty flag + file path + Problems list),
+  the `Command` vocabulary (18 variants, each with a human label), and `Bench`
+  (a `Runtime` plus the simulation panel's operator positions, with `step`,
+  `start`/`stop`, `run_one_cycle`, readings and hot `reload`).
+- Simulation bench: `SimulationPanel` (switches, push-buttons, lamps, sliders and
+  gauges) is part of the project, while the operator's positions live in runtime
+  state, so saving a program never records that somebody left a switch closed.
+  `SimulationPanel::auto_fill` mirrors every `%I`/`%Q`/`%IW`/`%QW` the program
+  uses and labels each widget with the bound symbol.
+- Full egui editor: element palette, pan/zoom rung canvas with live power-flow
+  indication, sections and rung list, element properties with variable
+  validation, Bench / Watch / Problems / Symbols panels, menu bar, status bar,
+  unsaved-changes prompt and native file dialogs.
+- New diagnostics `SL-W020` (a bench widget addresses the wrong variable kind or
+  has an inverted range) and the `ReplaceElement` command, so dropping a palette
+  element on an occupied cell is a single undo step.
+- `docs/EDITOR.md`: the editor's UX contract (layout, shortcuts, bench, live
+  indication) and what is deliberately left for later milestones.
+
+### Fixed
+
+- Power flow: vertical links are per column (a link no longer merges the rows of
+  the columns to its right, which used to let a parallel branch bypass a series
+  stop contact) and empty cells in a live row now carry `state_on_left`, so the
+  shared power of a merge column also reaches the empty cells of that column.
+
 ## [Unreleased] — M1 core
 
 ### Added

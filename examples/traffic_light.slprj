@@ -64,6 +64,62 @@
     { "name": "amber_lamp", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "accessor": null }, "comment": "Traffic light, amber aspect", "unit": null },
     { "name": "vehicle_count", "var": { "kind": "MemWord", "index": 0, "index_expr": null, "accessor": null }, "comment": "Vehicles seen when the counter reached its preset", "unit": "veh" }
   ],
+  "simulation": {
+    "switches": [
+      {
+        "var": {
+          "kind": "PhysIn",
+          "index": 0,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "start_button",
+        "momentary": false
+      },
+      {
+        "var": {
+          "kind": "PhysIn",
+          "index": 1,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "vehicle_trigger",
+        "momentary": false
+      },
+      {
+        "var": {
+          "kind": "PhysIn",
+          "index": 2,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "stop_button",
+        "momentary": false
+      }
+    ],
+    "lamps": [
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 0,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "green_lamp"
+      },
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 1,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "amber_lamp"
+      }
+    ],
+    "analogs": [],
+    "gauges": []
+  },
   "scan": {
     "period_ms": 10,
     "input_period_ms": 10

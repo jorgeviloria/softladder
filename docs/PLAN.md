@@ -121,6 +121,7 @@ softladder/
 │   ├── softladder-core/      # dominio puro: modelo, scan engine, FBs, SFC, expresiones, diagnósticos
 │   ├── softladder-project/   # formato nativo (.slprj) + import/export ClassicLadder + PLCopen XML
 │   ├── softladder-runtime/   # scheduler de scan, máquina de estados, grabación/replay, alarmas
+│   ├── softladder-edit/      # comandos de edición, undo/redo y banco de simulación (sin UI)
 │   ├── softladder-io/        # traits de IO + drivers: sim, Modbus TCP/RTU, gpiod, LinuxCNC HAL
 │   ├── softladder-monitor/   # protocolo online (JSON/CBOR + WS), servidor del dashboard web
 │   ├── softladder-ui/        # editor egui/eframe (binario principal)
@@ -136,12 +137,16 @@ softladder/
 
 ```
 core  ←  project  ←  runtime  ←  io
-  ↑                    ↑         ↑
-  └──────── ui ────────┴─────────┘
-             cli ──────┘
+  ↑         ↑           ↑        ↑
+  │         └── edit ───┘        │
+  └──────── ui ──────────────────┘
+             cli ────────────────┘
 ```
 
 - `softladder-core` **no** depende de ningún otro crate del workspace ni de IO/UI/red.
+- `softladder-edit` concentra *lo que el editor hace* (comandos, historial, ficheros, banco de
+  simulación) para que todo eso se testee sin abrir una ventana; `softladder-ui` solo dibuja y
+  traduce entrada en `Command`s.
 - `#![forbid(unsafe_code)]` en `core`, `project`, `runtime`, `monitor`, `ui`, `cli`.
   `unsafe` solo en crates `-sys` de FFI (gpiod, HAL), aislado y documentado.
 - El tiempo entra al núcleo como **parámetro** (`now: Instant`/tick), nunca llamando al reloj dentro:
@@ -267,7 +272,7 @@ Cada hito termina con criterios de aceptación verificables. **M0 ya está ejecu
 | --- | --- | --- |
 | **M0** ✅ | Repositorio, workspace Cargo, CI, plan y ADRs | `cargo fmt/clippy/test` en verde y CI corriendo en GitHub |
 | **M1** ✅ | Núcleo: variables v2 con accesores, power flow por columna, FBs completos (temporizadores, contadores, registros), saltos y subrutinas, `lint` estructural, tiempo simulado determinista, migración v1→v2 | 167 tests en verde; el ejemplo se ejecuta por CLI con salida idéntica entre ejecuciones; `lint` sin diagnósticos |
-| **M2** | Editor MVP en egui: crear/editar/guardar rungs, undo/redo, panel de simulación | Programa "semáforo" editable y ejecutable en simulación; cerrar y reabrir conserva el proyecto |
+| **M2** ✅ | Editor egui: paleta de elementos, canvas con power flow en vivo, undo/redo por comandos, banco de simulación persistido, panel de problemas, `softladder-edit` sin UI | El test de aceptación `m2_acceptance.rs` abre el semáforo, lo simula (arranque, enclavamiento, stop, temporizador), lo edita, lo guarda y lo reabre idéntico; 330 tests en verde |
 | **M3** | Import/export ClassicLadder + corpus dorado | Los 39 proyectos de `projects_examples/` importan sin pánico; round-trip estable; avisos por elemento |
 | **M4** | SFC/Grafcet: modelo, motor y editor | Los ejemplos `example_sequential*.clprj` se ejecutan igual que en la referencia |
 | **M5** | IO: sim scripting, Modbus TCP maestro/esclavo, luego RTU, con mapa configurable | Test de integración con servidor Modbus simulado; esclavo expone el mapa configurado |
@@ -315,8 +320,19 @@ Hitos de calidad transversales: cada hito añade sus tests, sus docs y su entrad
 - Ejemplo semilla `examples/traffic_light.slprj` y `examples/README.md`.
 - `softladder-cli` ejecuta un proyecto en modo headless (esqueleto funcional del ciclo de scan).
 
-**Siguiente paso inmediato**: M2 — editor MVP en egui (crear/editar/guardar rungs, undo/redo,
-panel de simulación), ya sobre un motor que ejecuta ladder de verdad.
+**Siguiente paso inmediato**: M3 — import/export de ClassicLadder y paridad contra el corpus dorado
+(los 39 proyectos de `projects_examples/`).
+
+### Deuda resuelta en M2
+
+- Editor con edición real: paleta, colocación con un solo paso de undo, arrastre, borrado, enlace
+  vertical, edición de variable con validación y de `params`.
+- Undo/redo ilimitado por comandos (`softladder-edit`), probado con `proptest`: deshacer todo
+  restaura el proyecto exactamente.
+- Banco de simulación persistido en el proyecto, con posiciones de operador en estado de runtime.
+- Panel de problemas con `lint` + validación del banco + errores del último scan.
+- Fix del motor: enlaces verticales por columna y cables implícitos que propagan la fusión (una rama
+  paralela ya no puede saltarse un contacto de stop en serie).
 
 ### Deuda resuelta en M1
 

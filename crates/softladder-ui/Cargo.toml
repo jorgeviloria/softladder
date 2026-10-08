@@ -17,6 +17,11 @@ path = "src/main.rs"
 
 [dependencies]
 softladder-core = { path = "../softladder-core" }
+softladder-edit = { path = "../softladder-edit" }
 softladder-project = { path = "../softladder-project" }
 eframe = { workspace = true }
 egui = { workspace = true }
+rfd = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

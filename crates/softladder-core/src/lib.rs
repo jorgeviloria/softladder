@@ -9,6 +9,7 @@
 //! * [`model`] — the ladder-logic project model.
 //! * [`expr`] — expression tokenizer, Pratt parser and evaluator.
 //! * [`scan`] — variable store, function blocks and the deterministic engine.
+//! * [`sim`] — simulation panel (bench layout) and its runtime positions.
 //! * [`sfc`] — Sequential Function Chart model (engine lands in M4).
 //! * [`diag`] — diagnostics shared by loading, linting and scanning.
 
@@ -20,6 +21,7 @@ pub mod expr;
 pub mod model;
 pub mod scan;
 pub mod sfc;
+pub mod sim;
 pub mod vars;
 
 pub use diag::{Diagnostic, Severity};
@@ -33,4 +35,5 @@ pub use scan::{
     VarStore,
 };
 pub use sfc::{SequentialPage, Step, Transition};
+pub use sim::{PanelState, SimAnalog, SimGauge, SimLamp, SimReading, SimSwitch, SimulationPanel};
 pub use vars::{Accessor, VarKind, VarParseError, VarRef};

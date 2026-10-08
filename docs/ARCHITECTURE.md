@@ -10,13 +10,18 @@
 | `softladder-core` | Domain model, variable namespace, expression evaluation, scan engine, function blocks, SFC, diagnostics | nothing (only `serde`, `thiserror`) | forbidden |
 | `softladder-project` | Native `.slprj` format, migrations, ClassicLadder `.clp/.clprj/.clprjz` import/export, PLCopen XML (later) | `core` | forbidden |
 | `softladder-runtime` | Scan scheduler, run-state machine, hot reload, scan statistics, flight recorder/replay, alarms | `core`, `project` | forbidden |
+| `softladder-edit` | Editing commands, undo/redo history, file handling and the simulation bench (the editor's logic, without a UI) | `core`, `project`, `runtime` | forbidden |
 | `softladder-io` | `IoDriver` trait and drivers: `sim`, `modbus`, `gpio`, `hal` | `core` | forbidden (FFI lives in dedicated `-sys` crates) |
 | `softladder-monitor` | Online monitor protocol + web dashboard server | `core` | forbidden |
-| `softladder-ui` | egui/eframe editor (main binary) | `core`, `project`, `runtime` | forbidden |
+| `softladder-ui` | egui/eframe editor (main binary) | `core`, `project`, `runtime`, `edit` | forbidden |
 | `softladder-cli` | Headless binary: `run`, `lint`, `test`, `import`, `export` | `core`, `project`, `runtime`, `io` | forbidden |
 
 **Invariant:** dependencies only point right-to-left in the table above. `core` must never grow a
 dependency on IO, UI, networking, or the system clock.
+
+`softladder-edit` exists so that everything an editor *does* — placing elements, undoing, saving,
+driving the simulation bench — is testable in a plain `cargo test` with no window. The egui layer
+only draws state and turns input into `Command`s.
 
 ## 2. Runtime data flow
 
@@ -130,9 +135,14 @@ egui (immediate mode) with `egui_dock` for panel layout. Rendering is recomputed
 cost model matters: documents are culled to the visible viewport, element shapes are cached, and the
 canvas keeps an element index for O(visible) hit-testing. Target: 60 fps with 5,000 elements.
 
-Editing is command-based (`Command` trait with `apply`/`revert`) which gives undo/redo for free and
-makes every edit testable without a UI. The UI holds no authoritative state: it renders `Project` +
-`Runtime` and emits `Command`s.
+Editing is command-based: `softladder-edit` exposes `Command`, `Editor` (project + bounded
+undo/redo history + dirty flag + file path + problems) and `Bench` (a `Runtime` plus the simulation
+panel's operator positions). `apply` snapshots only the part of the project a command touches, so
+undo/redo is exact without cloning the whole project per edit.
+
+The UI keeps no authoritative state: it renders `Editor` + `Bench` and emits `Command`s. Anything
+that changes the program, the bench or the run state is a method on those two types, which is why
+the editor's behaviour is covered by headless tests rather than by clicking through a window.
 
 ## 10. Engineering conventions
 

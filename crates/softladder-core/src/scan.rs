@@ -2565,6 +2565,18 @@ pub fn lint(project: &Project) -> Vec<Diagnostic> {
         }
         for (position, rung_id) in section.rungs.iter().enumerate() {
             let Some(rung) = project.rung(*rung_id) else {
+                diagnostics.push(context(
+                    Diagnostic::new(
+                        Severity::Error,
+                        "SL-E011",
+                        format!(
+                            "section `{}` references rung {rung_id}, which does not exist",
+                            section.name
+                        ),
+                    ),
+                    index,
+                    position,
+                ));
                 continue;
             };
             let mut seen: Vec<(u8, u8)> = Vec::new();

@@ -4,14 +4,27 @@
 //! and tests never have to match on human readable prose. The codes currently
 //! in use are:
 //!
-//! | code | meaning |
-//! |------|---------|
-//! | `SL-W001` | a section references a rung id that does not exist |
-//! | `SL-W002` | an SFC section was skipped (engine lands in M4) |
-//! | `SL-E001` | a variable is unknown or out of range in the store |
-//! | `SL-E002` | expression parsing/evaluation failed (divide by zero, …) |
-//! | `SL-E003` | an invalid block parameter or block variable |
-//! | `SL-E004` | an element is missing its variable |
+//! Errors and warnings are documented in `docs/SEMANTICS.md` §5 and
+//! `docs/ELEMENTS.md`; `softladder-core::lint` and the scan engine emit:
+//!
+//! | code | severity | meaning |
+//! |------|----------|---------|
+//! | `SL-E001` | error | a variable is unknown or out of range in the store |
+//! | `SL-E002` | error | expression parsing/evaluation failed (divide by zero, …) |
+//! | `SL-E003` | error | an invalid block parameter or block variable |
+//! | `SL-E004` | error | an element is missing its variable |
+//! | `SL-E005` | error | a jump target (rung index or label) does not exist |
+//! | `SL-E006` | error | the mad-loop jump guard tripped |
+//! | `SL-E007` | error | a call to an undefined or non-subroutine section |
+//! | `SL-E008` | error | the subroutine call stack overflowed |
+//! | `SL-E009` | error | two elements are placed on the same cell |
+//! | `SL-E011` | error | a section references a rung id that does not exist |
+//! | `SL-W001` | warning | a live row has no path to power (empty column 0, no vertical link) |
+//! | `SL-W002` | warning | an SFC section was skipped (engine lands in M4) |
+//!
+//! The CLI adds the project-level `SL-E010` (duplicate id), `SL-W010` (no rungs)
+//! and `SL-W011` (empty rung), and `softladder-edit` adds `SL-W020` for a
+//! simulation-bench widget that addresses the wrong kind of variable.
 
 use std::fmt;
 

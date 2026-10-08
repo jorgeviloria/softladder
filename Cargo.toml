@@ -31,7 +31,11 @@ flate2 = "1.0"
 # (1.81) is compatible with the workspace `rust-version` of 1.82.
 eframe = "0.31"
 egui = "0.31"
+# Native file dialogs. The default `xdg-portal` backend on Linux is pure Rust,
+# so it needs no GTK headers at build time.
+rfd = "0.15"
 
 # Test-only helpers
 tempfile = "3.10"
 insta = { version = "1.40", features = ["json"] }
+proptest = "1.5"

@@ -1,6 +1,5 @@
 ---
 source: crates/softladder-project/tests/migration.rs
-assertion_line: 113
 expression: value
 ---
 {
@@ -135,6 +134,12 @@ expression: value
       "subroutine": null
     }
   ],
+  "simulation": {
+    "analogs": [],
+    "gauges": [],
+    "lamps": [],
+    "switches": []
+  },
   "symbols": [
     {
       "comment": "Declared without a variable binding",

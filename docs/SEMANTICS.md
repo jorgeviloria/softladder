@@ -237,8 +237,13 @@ compare — are unaffected.
 
 `if input { jump to params[0] }`. The target is resolved inside the current section:
 
-- a parameter that parses as an integer is a **rung index** (ClassicLadder semantics),
+- a parameter that parses as an integer is a **rung index**: the zero-based position of the target
+  rung inside the section (ClassicLadder's rung numbering adapted to SoftLadder's section-scoped
+  rung lists; the importer performs the mapping),
 - otherwise it is matched against the `label` of the section's rungs (SoftLadder convenience).
+
+A jump to the rung it sits in is accepted, not diagnosed: it is simply caught by the mad-loop guard
+below, which is the same protection a mutually recursive pair of jumps gets.
 
 A jump aborts the current rung immediately: the remaining columns and rows are not evaluated. An
 unknown target produces `SL-E005` and the jump is ignored. A jump executed more than 100 000 times in

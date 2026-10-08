@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::sim::SimulationPanel;
 use crate::vars::VarRef;
 
 /// Flavour of an IEC 61131-3 timer block.
@@ -313,6 +314,9 @@ pub struct Project {
     pub rungs: Vec<Rung>,
     /// Symbol table.
     pub symbols: Vec<Symbol>,
+    /// Simulation bench laid out for this project (widgets without positions).
+    #[serde(default)]
+    pub simulation: SimulationPanel,
     /// Scan timing configuration.
     pub scan: ScanConfig,
 }
@@ -338,6 +342,7 @@ impl Default for Project {
             sections: Vec::new(),
             rungs: Vec::new(),
             symbols: Vec::new(),
+            simulation: SimulationPanel::default(),
             scan: ScanConfig::default(),
         }
     }

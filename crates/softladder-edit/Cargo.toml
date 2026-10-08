@@ -1,0 +1,20 @@
+[package]
+name = "softladder-edit"
+description = "Editor application layer for SoftLadder: commands, undo/redo, file handling and the simulation bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+softladder-core = { path = "../softladder-core" }
+softladder-project = { path = "../softladder-project" }
+softladder-runtime = { path = "../softladder-runtime" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tempfile = { workspace = true }
