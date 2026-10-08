@@ -14,13 +14,22 @@ A rung is a grid of cells addressed by `(col, row)`, both zero-based, `col` grow
 
 Each cell holds at most one [`PlacedElement`]. Two connectivity rules matter:
 
-- **Horizontal flow is implicit.** A row that contains at least one element is *live*: empty cells in
-  a live row conduct (they behave as wire). A row with no elements at all is *inert*: it never
-  conducts, so it cannot inject power into a vertical link.
-- **Vertical flow is explicit.** An element with `connected_with_top: true` links the *left side* of
-  the cell to the left side of the cell above it (the `Connection` element is the usual carrier, but
-  the flag is a property of the cell and may sit on any element). Chains of such links form a
-  vertical block.
+- **Horizontal flow is implicit.** A row that contains at least one element is *live*: an empty cell
+  in a live row conducts exactly what a `Connection` cell would carry, i.e. `state_on_left` of that
+  cell — including the vertical merge described below. A row with no elements at all is *inert*: it
+  never conducts, so it cannot inject power into a vertical link.
+  An empty cell in **column 0 is not the power rail**: only a cell that exists in column 0 touches
+  the rail. That is what makes a branch that taps into the middle of a rung possible — the branch
+  starts empty in column 0 and receives its power through the vertical link instead of from the
+  rail. A live row whose column 0 is empty and that has no link to draw power from is unreachable
+  and reported as `SL-W001`.
+- **Vertical flow is explicit and per column.** An element with `connected_with_top: true` links the
+  *left side* of its cell to the left side of the cell above it **in the same column** (the
+  `Connection` element is the usual carrier, but the flag is a property of the cell and may sit on
+  any element). Chains of such links form a vertical block. A link drawn in one column never affects
+  its neighbours: place it in the column where the branches merge, so that a series element in that
+  same column (a stop contact, for instance) is fed by the merged power and can still break the
+  circuit.
 
 ### Divergence from ClassicLadder
 
@@ -275,7 +284,7 @@ reads the clock, the filesystem or the network.
 | `SL-E007` | Error | call to an undefined or non-subroutine section |
 | `SL-E008` | Error | subroutine call stack overflow |
 | `SL-E009` | Error | two elements placed on the same cell |
-| `SL-W001` | Warning | a live row has no path to the left rail (unreachable branch) |
+| `SL-W001` | Warning | a live row has no path to power (empty column 0 and no vertical link feeding it) |
 | `SL-W002` | Warning | SFC section skipped (engine lands in M4) |
 
 Diagnostics carry the section id and rung id when available. The runtime surfaces them to the CLI

@@ -1495,13 +1495,19 @@ impl Machine<'_> {
         while column < grid.columns {
             std::mem::swap(&mut self.output_prev, &mut self.output_next);
             // Horizontal flow is implicit: an empty cell in a *live* row (a row
-            // that holds at least one element) conducts, so it simply forwards
-            // the output of the cell to its left. A row with no elements at all
-            // is inert: it breaks the flow and can never inject power into a
-            // vertical link.
+            // that holds at least one element) conducts. It carries exactly what
+            // a `Connection` cell would carry, which is `state_on_left` — the OR
+            // of the previous column over the vertical block at this column. That
+            // matters wherever a row is joined to its neighbour: the shared power
+            // must reach the empty cells of the merge column too, not just the
+            // cells that hold an element. A row with no elements at all is inert:
+            // it breaks the flow and can never inject power into a vertical link,
+            // and an empty cell in column 0 is *not* the rail (a branch that taps
+            // in mid-rung must not be fed from the rail — that is what `SL-W001`
+            // warns about).
             for row in 0..rows {
                 let value = if grid.live_row(row) {
-                    self.output_prev.get(row).copied().unwrap_or(false)
+                    self.state_on_left(grid, column, row)
                 } else {
                     false
                 };
@@ -2141,12 +2147,12 @@ impl Machine<'_> {
         }
         let mut result = self.output_prev.get(row).copied().unwrap_or(false);
         let mut y = row;
-        while y > 0 && grid.linked_up(y) {
+        while y > 0 && grid.linked_up(col, y) {
             y -= 1;
             result |= self.output_prev.get(y).copied().unwrap_or(false);
         }
         let mut y = row + 1;
-        while y < self.cache.max_rows && grid.linked_up(y) {
+        while y < self.cache.max_rows && grid.linked_up(col, y) {
             result |= self.output_prev.get(y).copied().unwrap_or(false);
             y += 1;
         }
@@ -2268,8 +2274,8 @@ struct BlockCell {
     span: u8,
     /// Variable index of the block instance (`%TM<n>`, `%C<n>`, `%R<n>`).
     index: usize,
-    /// Vertical link table of the block's rung.
-    links: Vec<bool>,
+    /// Vertical link table of the block's rung, indexed `[column][row]`.
+    links: Vec<Vec<bool>>,
     /// Number of rows in the block's rung.
     max_rows: usize,
     /// `true` for every row that holds at least one element, so that the rail
@@ -2278,13 +2284,15 @@ struct BlockCell {
 }
 
 impl BlockCell {
-    /// `true` when the cell at `row` declares a link with the cell above it.
+    /// `true` when the cell at `(column, row)` declares a link with the cell
+    /// above it, in the same column.
     fn linked_up(&self, row: usize) -> bool {
         if row == 0 || row >= self.max_rows {
             return false;
         }
         self.links
-            .get(row * self.max_rows + row - 1)
+            .get(self.column)
+            .and_then(|column| column.get(row))
             .copied()
             .unwrap_or(false)
     }
@@ -2303,9 +2311,10 @@ struct RungGrid {
     /// `live_rows[row]` is `true` when the row holds at least one element and
     /// therefore conducts through its empty cells.
     live_rows: Vec<bool>,
-    /// `links[row * max_rows + row - 1]` is the `connected_with_top` flag of
-    /// the cell at `row`.
-    links: Vec<bool>,
+    /// `links[col][row]` is the `connected_with_top` flag of the cell at
+    /// `(col, row)`. Links are per column: a wire drawn under one column must
+    /// not merge the rows of the neighbouring columns.
+    links: Vec<Vec<bool>>,
     /// Multi-row blocks, indexed by their first row.
     blocks: Vec<Option<BlockCell>>,
     /// Number of columns, including the implicit wire column `0`.
@@ -2324,13 +2333,15 @@ impl RungGrid {
         id.checked_sub(self.element_base)
     }
 
-    /// `true` when the cell at `row` declares a link with the cell above it.
-    fn linked_up(&self, row: usize) -> bool {
+    /// `true` when the cell at `(col, row)` declares a link with the cell above
+    /// it, in the same column.
+    fn linked_up(&self, col: usize, row: usize) -> bool {
         if row == 0 || row >= self.max_rows {
             return false;
         }
         self.links
-            .get(row * self.max_rows + row - 1)
+            .get(col)
+            .and_then(|column| column.get(row))
             .copied()
             .unwrap_or(false)
     }
@@ -2423,7 +2434,7 @@ impl RungCache {
                 .map_or(0, |col| col + 1);
 
             let mut cells: Vec<Vec<Option<u32>>> = vec![vec![None; max_rows]; max_col];
-            let mut links = vec![false; max_rows * max_rows];
+            let mut links: Vec<Vec<bool>> = vec![vec![false; max_rows]; max_col];
             let mut occupied_rows = vec![false; max_rows];
             let mut live_rows = vec![false; max_rows];
             let mut blocks: Vec<Option<BlockCell>> = vec![None; max_rows];
@@ -2450,7 +2461,10 @@ impl RungCache {
                     }
                 }
                 if element.connected_with_top && row > 0 {
-                    if let Some(link) = links.get_mut(row * max_rows + row - 1) {
+                    if let Some(link) = links
+                        .get_mut(usize::from(element.col))
+                        .and_then(|column| column.get_mut(row))
+                    {
                         *link = true;
                     }
                 }
@@ -3557,8 +3571,11 @@ mod tests {
             vec![
                 element(ElementKind::ContactNo, Some("%I0"), 0, 0),
                 element(ElementKind::ContactNo, Some("%I1"), 0, 1),
-                linked(ElementKind::Connection, None, 1, 1),
-                linked(ElementKind::CoilOut, Some("%Q0"), 2, 0),
+                // The link lives in the column that merges the branches, so the
+                // coil's own input is the OR of both rows. Links are per column:
+                // a link placed one column earlier would not reach the coil.
+                linked(ElementKind::Connection, None, 2, 1),
+                element(ElementKind::CoilOut, Some("%Q0"), 2, 0),
             ],
         )]);
 
@@ -4996,5 +5013,80 @@ mod tests {
         assert_eq!(second.jumps, 0);
         assert_eq!(second.calls, 0);
         assert!(has(&second, "SL-E004"));
+    }
+    #[test]
+    fn a_series_element_in_the_merge_column_is_not_bypassed() {
+        // The classic start/stop seal: %I0 starts, the normally-closed %I2 stops,
+        // and %Q0 holds itself in through the row below. The vertical link sits
+        // in the same column as the stop contact, so the contact's input is the
+        // OR of both branches — and its output, not the raw branch power, is what
+        // reaches the coil. Regression test: when links were stored per row
+        // instead of per column, the merge leaked one column to the right and the
+        // stop button could not break the seal.
+        let mut engine = engine(vec![rung(
+            1,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                element(ElementKind::ContactNc, Some("%I2"), 1, 0),
+                element(ElementKind::ContactNo, Some("%Q0"), 0, 1),
+                linked(ElementKind::Connection, None, 1, 1),
+                element(ElementKind::CoilOut, Some("%Q0"), 2, 0),
+            ],
+        )]);
+
+        // Start pressed: the seal closes.
+        set_bit(&mut engine, "%I0", true);
+        engine.scan_once(0);
+        assert_eq!(get(&engine, "%Q0"), Some(Value::Bit(true)));
+
+        // Start released: the lamp stays on through its own contact.
+        set_bit(&mut engine, "%I0", false);
+        engine.scan_once(10);
+        assert_eq!(
+            get(&engine, "%Q0"),
+            Some(Value::Bit(true)),
+            "the seal holds without the start button"
+        );
+
+        // Stop pressed: the normally-closed contact opens and breaks the seal.
+        set_bit(&mut engine, "%I2", true);
+        engine.scan_once(20);
+        assert_eq!(
+            get(&engine, "%Q0"),
+            Some(Value::Bit(false)),
+            "the stop button must break the seal"
+        );
+
+        // Releasing stop does not restart the lamp: start is still open.
+        set_bit(&mut engine, "%I2", false);
+        engine.scan_once(30);
+        assert_eq!(get(&engine, "%Q0"), Some(Value::Bit(false)));
+    }
+
+    #[test]
+    fn a_vertical_link_only_merges_its_own_column() {
+        // Row 0 and row 1 are joined in column 1, but column 2 carries a
+        // normally-open contact in row 0. The contact must see only its own row's
+        // power, so the coil stays off until that contact is closed.
+        let mut engine = engine(vec![rung(
+            1,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                element(ElementKind::ContactNo, Some("%I1"), 0, 1),
+                linked(ElementKind::Connection, None, 1, 1),
+                element(ElementKind::ContactNo, Some("%I3"), 2, 0),
+                element(ElementKind::CoilOut, Some("%Q0"), 3, 0),
+            ],
+        )]);
+
+        // Only the lower branch is live, and %I3 is open: no path to the coil.
+        set_bit(&mut engine, "%I1", true);
+        engine.scan_once(0);
+        assert_eq!(get(&engine, "%Q0"), Some(Value::Bit(false)));
+
+        // Closing %I3, which sits to the right of the link, completes the path.
+        set_bit(&mut engine, "%I3", true);
+        engine.scan_once(10);
+        assert_eq!(get(&engine, "%Q0"), Some(Value::Bit(true)));
     }
 }
