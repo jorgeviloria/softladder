@@ -273,7 +273,7 @@ Cada hito termina con criterios de aceptación verificables. **M0 ya está ejecu
 | **M0** ✅ | Repositorio, workspace Cargo, CI, plan y ADRs | `cargo fmt/clippy/test` en verde y CI corriendo en GitHub |
 | **M1** ✅ | Núcleo: variables v2 con accesores, power flow por columna, FBs completos (temporizadores, contadores, registros), saltos y subrutinas, `lint` estructural, tiempo simulado determinista, migración v1→v2 | 167 tests en verde; el ejemplo se ejecuta por CLI con salida idéntica entre ejecuciones; `lint` sin diagnósticos |
 | **M2** ✅ | Editor egui: paleta de elementos, canvas con power flow en vivo, undo/redo por comandos, banco de simulación persistido, panel de problemas, `softladder-edit` sin UI | El test de aceptación `m2_acceptance.rs` abre el semáforo, lo simula (arranque, enclavamiento, stop, temporizador), lo edita, lo guarda y lo reabre idéntico; 330 tests en verde |
-| **M3** | Import/export ClassicLadder + corpus dorado | Los 39 proyectos de `projects_examples/` importan sin pánico; round-trip estable; avisos por elemento |
+| **M3** ✅ | Import/export ClassicLadder + corpus dorado | Los 41 proyectos del corpus importan sin pánico (272 rungs, 9.273 elementos); `import → export → import` es punto fijo; la segunda exportación es byte a byte idéntica; las partes no modeladas sobreviven intactas; un test de comportamiento prueba que el temporizador importado recibe su enable con preset y base correctos |
 | **M4** | SFC/Grafcet: modelo, motor y editor | Los ejemplos `example_sequential*.clprj` se ejecutan igual que en la referencia |
 | **M5** | IO: sim scripting, Modbus TCP maestro/esclavo, luego RTU, con mapa configurable | Test de integración con servidor Modbus simulado; esclavo expone el mapa configurado |
 | **M6** | Monitor online + dashboard web + alarmas/journal | Ver y forzar variables desde el navegador; journal consultable; forzado auditado |
@@ -320,8 +320,22 @@ Hitos de calidad transversales: cada hito añade sus tests, sus docs y su entrad
 - Ejemplo semilla `examples/traffic_light.slprj` y `examples/README.md`.
 - `softladder-cli` ejecuta un proyecto en modo headless (esqueleto funcional del ciclo de scan).
 
-**Siguiente paso inmediato**: M3 — import/export de ClassicLadder y paridad contra el corpus dorado
-(los 39 proyectos de `projects_examples/`).
+**Siguiente paso inmediato**: M4 — SFC/Grafcet (modelo, motor y editor) sobre el mismo corpus
+secuencial, más el cierre de las divergencias de comportamiento listadas en
+`testdata/known-divergences.md`.
+
+### Deuda resuelta en M3
+
+- Importador y exportador reales de ClassicLadder, capa por capa, con informe de diagnósticos
+  localizados (`SL-E030`, `SL-W030`–`SL-W033`) y passthrough byte a byte de lo no modelado.
+- Mapeo exacto de la columna de los bloques (la referencia lee el enable en la columna del *cuerpo*),
+  con los enlaces verticales del cuerpo materializados: sin esto los programas importados no
+  arrancaban.
+- Biblioteca de funciones de expresión (`ABS/MIN/MAX/AVG/POW/SHL/SHR/ROL/ROR` y alias de
+  ClassicLadder), literales hexadecimales `$8000` y operadores `&`/`|`.
+- Dos fallos del motor corregidos: la base de un minuto valía 60 minutos, y reconfigurar un
+  temporizador con el mismo preset reiniciaba un retardo TOF en curso.
+- Registro de divergencias de comportamiento: `testdata/known-divergences.md`.
 
 ### Deuda resuelta en M2
 

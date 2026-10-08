@@ -41,6 +41,7 @@ The field order below is the order `serde` emits, and therefore the order that a
       "id": 0,
       "label": "LAMP",               // jump target, "" when unused
       "comment": "Self-holding lamp",
+      "wire_mode": "Implicit",       // "Implicit" (gaps conduct) | "Explicit" (gaps break)
       "elements": [
         { "kind": "ContactNo",
           "var": { "kind": "PhysIn", "index": 0, "index_expr": null, "accessor": null },
@@ -75,6 +76,11 @@ The field order below is the order `serde` emits, and therefore the order that a
   `{"Register": {"mode": "Fifo"}}`). The full list is in [`ELEMENTS.md`](ELEMENTS.md).
 - `connected_with_top` marks the cell as wired to the cell above it in the same column; it is what
   builds parallel branches and merges. See [`SEMANTICS.md`](SEMANTICS.md) §2.
+- `wire_mode` decides what an empty cell does inside a live row: `Implicit` (the default) makes it
+  conduct, which is what the editor produces when elements are placed apart; `Explicit` makes a gap
+  break the circuit, which is ClassicLadder's behaviour and what the importer sets on every rung it
+  reads, so imported programs keep behaving exactly as they did. See
+  [ADR-0007](adr/0007-wire-modes.md).
 - `var.kind` is a `VarKind` variant name (`MemBit`, `MemWord`, `PhysIn`, `PhysOut`, `PhysInWord`,
   `PhysOutWord`, `TimerIec`, `Counter`, `Register`, `Step`, `System`, `Led`); `index_expr` holds a
   nested `VarRef` for indexed variables (`%MW[%MW0]`); `accessor` selects a sub-value of a structured

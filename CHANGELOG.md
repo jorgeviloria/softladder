@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — M3 ClassicLadder compatibility
+
+### Added
+
+- Real ClassicLadder import and export, validated against the 41 example projects
+  upstream ships (272 rungs, 9 273 elements): every file imports, `import →
+  export → import` is a fixed point, a second export is byte-identical, and the
+  parts SoftLadder does not model survive byte for byte. The
+  `softladder-project::classicladder` layer reads every part of a `.clp`/`.clprj`/`.clprjz` container (rungs with
+  their dense cell matrices, sections, symbols, IEC timer/counter/register and
+  arithmetic-expression tables, project info and general parameters) into a
+  `Project`, and writes a document the reference implementation can load back.
+- Parts SoftLadder does not model (Modbus and serial configuration, IO mapping,
+  events, spy variables, alarm slots, sequential pages) are returned as an
+  `extras` template and written back byte for byte, so an import/export cycle
+  never loses them.
+- Import/export diagnostics with locations: `SL-E030` (malformed document),
+  `SL-W030` (element or structure approximated), `SL-W031` (variable family or
+  expression not modelled), `SL-W032` (part passed through) and `SL-W033`
+  (feature that cannot be exported).
+- `Rung::wire_mode`: `Explicit` makes a gap in a live row break the circuit,
+  which is ClassicLadder's behaviour and what the importer sets on every rung it
+  reads; `Implicit` keeps the editor's forgiving behaviour. See
+  [ADR-0007](docs/adr/0007-wire-modes.md).
+- Expression library: `ABS`, `MIN`, `MAX`, `AVG`, `POW`, `SHL`, `SHR`, `ROL`,
+  `ROR` with the ClassicLadder aliases (`MINI`, `MAXI`, `MOY`), hexadecimal
+  literals in the `$8000` spelling, and `&`/`|` accepted as `AND`/`OR`.
+- `scripts/fetch_corpus.sh` now also works offline from a local ClassicLadder
+  checkout, and CI fetches the corpus so the compatibility tests actually run.
+- `testdata/known-divergences.md`: every behavioural difference the corpus exposed,
+  with what each side does and why.
+
+### Fixed
+
+- A timer's one-minute base was a 60-minute base (`TIME_BASE_MINS` is 60 000 ms in
+  the reference), so an imported off-delay with a two-minute preset ran for two
+  hours.
+- Re-applying a timer's preset on every scan — which is how an HMI edit is picked
+  up — was treated as a preset *change* and restarted a running off delay, so a
+  TOF block dropped its output the moment its input fell.
+- Imported multi-cell blocks are placed on the column whose power the reference
+  taps for their inputs, with the columns they vacate wired through and the
+  vertical links of their body cells preserved; before this a block imported from
+  the corpus was never enabled.
+
 ## [Unreleased] — M2 editor
 
 ### Added

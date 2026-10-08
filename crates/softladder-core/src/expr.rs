@@ -144,6 +144,82 @@ impl fmt::Display for BinaryOp {
     }
 }
 
+/// Built-in function available to expressions.
+///
+/// The names are the ones SoftLadder uses; the parser also accepts the
+/// ClassicLadder spellings listed by [`Function::from_name`], which is what
+/// imported projects contain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Function {
+    /// `ABS(a)` — absolute value.
+    Abs,
+    /// `MIN(a, b, …)` — smallest argument.
+    Min,
+    /// `MAX(a, b, …)` — largest argument.
+    Max,
+    /// `AVG(a, b, …)` — integer average of the arguments.
+    Avg,
+    /// `POW(a, b)` — `a` raised to `b`.
+    Pow,
+    /// `SHL(a, n)` — shift left, bits shifted out are lost.
+    Shl,
+    /// `SHR(a, n)` — logical shift right.
+    Shr,
+    /// `ROL(a, n)` — rotate left.
+    Rol,
+    /// `ROR(a, n)` — rotate right.
+    Ror,
+}
+
+impl Function {
+    /// Canonical name, as printed by [`std::fmt::Display`].
+    pub fn name(self) -> &'static str {
+        match self {
+            Function::Abs => "ABS",
+            Function::Min => "MIN",
+            Function::Max => "MAX",
+            Function::Avg => "AVG",
+            Function::Pow => "POW",
+            Function::Shl => "SHL",
+            Function::Shr => "SHR",
+            Function::Rol => "ROL",
+            Function::Ror => "ROR",
+        }
+    }
+
+    /// Resolves a name, accepting the ClassicLadder aliases (`MINI`, `MAXI`,
+    /// `MOY`).
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name.to_ascii_uppercase().as_str() {
+            "ABS" => Some(Function::Abs),
+            "MIN" | "MINI" => Some(Function::Min),
+            "MAX" | "MAXI" => Some(Function::Max),
+            "AVG" | "MOY" => Some(Function::Avg),
+            "POW" => Some(Function::Pow),
+            "SHL" => Some(Function::Shl),
+            "SHR" => Some(Function::Shr),
+            "ROL" => Some(Function::Rol),
+            "ROR" => Some(Function::Ror),
+            _ => None,
+        }
+    }
+
+    /// Minimum and maximum number of arguments this function accepts.
+    pub fn arity(self) -> (usize, usize) {
+        match self {
+            Function::Abs => (1, 1),
+            Function::Pow | Function::Shl | Function::Shr | Function::Rol | Function::Ror => (2, 2),
+            Function::Min | Function::Max | Function::Avg => (2, usize::MAX),
+        }
+    }
+}
+
+impl fmt::Display for Function {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 /// Expression abstract syntax tree.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expr {
@@ -155,6 +231,8 @@ pub enum Expr {
     Unary(UnaryOp, Box<Expr>),
     /// Binary operation applied to two operands.
     Binary(BinaryOp, Box<Expr>, Box<Expr>),
+    /// Built-in function applied to its arguments.
+    Call(Function, Vec<Expr>),
 }
 
 impl Expr {
@@ -187,6 +265,16 @@ impl fmt::Display for Expr {
             Expr::Var(var) => write!(f, "{var}"),
             Expr::Unary(op, inner) => write!(f, "({op}{inner})"),
             Expr::Binary(op, lhs, rhs) => write!(f, "({lhs} {op} {rhs})"),
+            Expr::Call(function, args) => {
+                write!(f, "{function}(")?;
+                for (index, arg) in args.iter().enumerate() {
+                    if index > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{arg}")?;
+                }
+                write!(f, ")")
+            }
         }
     }
 }
@@ -212,6 +300,9 @@ pub enum EvalError {
     /// The expression could not be tokenized or parsed.
     #[error("parse error: {0}")]
     Parse(String),
+    /// A function argument is out of the domain the function accepts.
+    #[error("bad argument: {0}")]
+    BadArgument(String),
     /// The operands have incompatible types for the requested operation.
     #[error("type mismatch: {0}")]
     TypeMismatch(&'static str),
@@ -421,6 +512,8 @@ enum Token {
     Not,
     LParen,
     RParen,
+    Comma,
+    Function(Function),
 }
 
 impl Token {
@@ -462,6 +555,30 @@ fn tokenize(input: &str) -> Result<Vec<Token>, EvalError> {
         let byte = bytes[index];
         match byte {
             b' ' | b'\t' | b'\r' | b'\n' => index += 1,
+            b'$' | b'0' if byte == b'$' || matches!(bytes.get(index + 1), Some(b'x' | b'X')) => {
+                // ClassicLadder writes hexadecimal constants as `$8000`; `0x8000`
+                // is accepted too.
+                let start = index;
+                index += if byte == b'$' { 1 } else { 2 };
+                let digits_start = index;
+                while index < bytes.len() && bytes[index].is_ascii_hexdigit() {
+                    index += 1;
+                }
+                if index == digits_start {
+                    return Err(EvalError::Parse(format!(
+                        "expected hexadecimal digits after `{}`",
+                        &input[start..digits_start]
+                    )));
+                }
+                let digits = &input[digits_start..index];
+                let value = i64::from_str_radix(digits, 16).map_err(|_| {
+                    EvalError::Parse(format!("hexadecimal literal `{digits}` does not fit"))
+                })?;
+                let value = i32::try_from(value).map_err(|_| {
+                    EvalError::Parse(format!("hexadecimal literal `${digits}` is out of range"))
+                })?;
+                tokens.push(Token::Number(Value::Word(value)));
+            }
             b'0'..=b'9' => {
                 let start = index;
                 let mut real = false;
@@ -566,6 +683,18 @@ fn tokenize(input: &str) -> Result<Vec<Token>, EvalError> {
                     tokens.push(Token::Gt);
                 }
             }
+            b',' => {
+                index += 1;
+                tokens.push(Token::Comma);
+            }
+            b'&' => {
+                index += 1;
+                tokens.push(Token::And);
+            }
+            b'|' => {
+                index += 1;
+                tokens.push(Token::Or);
+            }
             byte if byte.is_ascii_alphabetic() || byte == b'_' => {
                 let start = index;
                 while index < bytes.len()
@@ -580,9 +709,15 @@ fn tokenize(input: &str) -> Result<Vec<Token>, EvalError> {
                     "XOR" => Token::Xor,
                     "NOT" => Token::Not,
                     "MOD" => Token::Percent,
-                    _ => {
-                        return Err(EvalError::Parse(format!("unknown identifier `{word}`")));
-                    }
+                    _ => match Function::from_name(&word) {
+                        Some(function) => Token::Function(function),
+                        None => {
+                            return Err(EvalError::Parse(format!(
+                                "unknown identifier `{word}`; known functions are ABS, MIN, MAX, \
+                                 AVG, POW, SHL, SHR, ROL, ROR"
+                            )));
+                        }
+                    },
                 };
                 tokens.push(token);
             }
@@ -632,6 +767,44 @@ impl Parser {
         let mut lhs = match self.advance() {
             Some(Token::Number(value)) => Expr::Lit(value),
             Some(Token::Var(var)) => Expr::Var(var),
+            Some(Token::Function(function)) => {
+                if self.peek() != Some(&Token::LParen) {
+                    return Err(EvalError::Parse(format!(
+                        "expected `(` after function `{function}`"
+                    )));
+                }
+                self.advance();
+                let mut args = Vec::new();
+                if self.peek() != Some(&Token::RParen) {
+                    loop {
+                        args.push(self.expr(0, depth + 1)?);
+                        match self.peek() {
+                            Some(Token::Comma) => {
+                                self.advance();
+                            }
+                            _ => break,
+                        }
+                    }
+                }
+                if self.peek() != Some(&Token::RParen) {
+                    return Err(EvalError::Parse(format!(
+                        "expected `)` to close `{function}(`"
+                    )));
+                }
+                self.advance();
+                let (min, max) = function.arity();
+                if args.len() < min || args.len() > max {
+                    return Err(EvalError::Parse(format!(
+                        "`{function}` takes {}",
+                        if min == max {
+                            format!("{min} argument(s)")
+                        } else {
+                            format!("at least {min} arguments")
+                        }
+                    )));
+                }
+                Expr::Call(function, args)
+            }
             Some(Token::Minus) => {
                 Expr::Unary(UnaryOp::Neg, Box::new(self.expr(UNARY_POWER, depth + 1)?))
             }
@@ -713,6 +886,81 @@ fn eval_at(expr: &Expr, source: &dyn VarSource, depth: u32) -> Result<Value, Eva
                 | BinaryOp::Ge => left.compare(right, *op),
                 BinaryOp::And | BinaryOp::Or | BinaryOp::Xor => left.logic(right, *op),
             }
+        }
+        Expr::Call(function, args) => {
+            let mut values = Vec::with_capacity(args.len());
+            for arg in args {
+                values.push(eval_at(arg, source, depth + 1)?);
+            }
+            call_function(*function, &values)
+        }
+    }
+}
+
+/// Applies a built-in function to already evaluated arguments.
+fn call_function(function: Function, args: &[Value]) -> Result<Value, EvalError> {
+    let word = |value: &Value| -> i32 { value.as_i64() as i32 };
+    match function {
+        Function::Abs => {
+            let value = word(&args[0]);
+            value
+                .checked_abs()
+                .map(Value::Word)
+                .ok_or(EvalError::Overflow("ABS"))
+        }
+        Function::Min => args
+            .iter()
+            .map(|value| value.as_i64())
+            .min()
+            .map(|value| Value::Word(value as i32))
+            .ok_or_else(|| EvalError::BadArgument("MIN needs arguments".to_owned())),
+        Function::Max => args
+            .iter()
+            .map(|value| value.as_i64())
+            .max()
+            .map(|value| Value::Word(value as i32))
+            .ok_or_else(|| EvalError::BadArgument("MAX needs arguments".to_owned())),
+        Function::Avg => {
+            let sum: i64 = args.iter().map(|value| value.as_i64()).sum();
+            let count = i64::try_from(args.len())
+                .map_err(|_| EvalError::BadArgument("AVG has too many arguments".to_owned()))?;
+            let average = sum / count;
+            i32::try_from(average)
+                .map(Value::Word)
+                .map_err(|_| EvalError::Overflow("AVG"))
+        }
+        Function::Pow => {
+            let base = word(&args[0]);
+            let exponent = word(&args[1]);
+            let exponent = u32::try_from(exponent).map_err(|_| {
+                EvalError::BadArgument("POW needs a non-negative exponent".to_owned())
+            })?;
+            base.checked_pow(exponent)
+                .map(Value::Word)
+                .ok_or(EvalError::Overflow("POW"))
+        }
+        Function::Shl | Function::Shr | Function::Rol | Function::Ror => {
+            let value = word(&args[0]);
+            let amount = word(&args[1]);
+            let amount = u32::try_from(amount).map_err(|_| {
+                EvalError::BadArgument(format!("{function} needs a non-negative shift"))
+            })?;
+            if amount > 31 {
+                return Err(EvalError::BadArgument(format!(
+                    "{function} shift must be 0..=31"
+                )));
+            }
+            let bits = value as u32;
+            let result = match function {
+                Function::Shl => bits.wrapping_shl(amount),
+                // The reference implementation masks the sign bit off a logical
+                // shift right, so a negative word shifts in zeros.
+                Function::Shr => (bits >> amount) & 0x7FFF_FFFF,
+                Function::Rol => bits.rotate_left(amount),
+                Function::Ror => bits.rotate_right(amount),
+                _ => unreachable!(),
+            };
+            Ok(Value::Word(result as i32))
         }
     }
 }
@@ -853,5 +1101,88 @@ mod tests {
         let expr = parse("1 + 2 * 3").expect("expression parses");
         let text = expr.to_string();
         assert_eq!(parse(&text), Ok(expr));
+    }
+    #[test]
+    fn hexadecimal_literals_follow_the_reference_spelling() {
+        let vars = TestVars::new(&[]);
+        assert_eq!(evaluate("$8000", &vars), Ok(Value::Word(32768)));
+        assert_eq!(evaluate("0x8000", &vars), Ok(Value::Word(32768)));
+        assert_eq!(evaluate("$FFFF", &vars), Ok(Value::Word(65535)));
+        assert_eq!(evaluate("$10 + 1", &vars), Ok(Value::Word(17)));
+        assert!(parse("$").is_err());
+        assert!(parse("$ZZZZ").is_err());
+        assert!(parse("$FFFFFFFFF").is_err());
+    }
+
+    #[test]
+    fn built_in_functions_evaluate() {
+        let vars = TestVars::new(&[]);
+        assert_eq!(evaluate("ABS(-7)", &vars), Ok(Value::Word(7)));
+        assert_eq!(evaluate("MIN(3, 1, 2)", &vars), Ok(Value::Word(1)));
+        assert_eq!(evaluate("MAX(3, 1, 2)", &vars), Ok(Value::Word(3)));
+        assert_eq!(evaluate("AVG(2, 4, 9)", &vars), Ok(Value::Word(5)));
+        assert_eq!(evaluate("POW(2, 10)", &vars), Ok(Value::Word(1024)));
+        assert_eq!(evaluate("SHL(1, 4)", &vars), Ok(Value::Word(16)));
+        assert_eq!(evaluate("SHR($8000, 3)", &vars), Ok(Value::Word(4096)));
+        // A logical shift right of a negative word shifts zeros in.
+        assert_eq!(
+            evaluate("SHR(0 - 2, 1)", &vars),
+            Ok(Value::Word(0x7FFF_FFFF))
+        );
+        assert_eq!(
+            evaluate("ROL(1, 31)", &vars),
+            Ok(Value::Word(-2_147_483_648))
+        );
+        assert_eq!(evaluate("ROR(2, 1)", &vars), Ok(Value::Word(1)));
+        assert!(evaluate("SHR(1, 32)", &vars).is_err());
+    }
+
+    #[test]
+    fn classicladder_function_aliases_are_accepted() {
+        let vars = TestVars::new(&[]);
+        assert_eq!(evaluate("MINI(3, 1)", &vars), Ok(Value::Word(1)));
+        assert_eq!(evaluate("MAXI(3, 1)", &vars), Ok(Value::Word(3)));
+        assert_eq!(evaluate("MOY(4, 8)", &vars), Ok(Value::Word(6)));
+        assert_eq!(parse("MOY(4, 8)").expect("parses").to_string(), "AVG(4, 8)");
+    }
+
+    #[test]
+    fn function_argument_errors_are_reported_not_panicked() {
+        let vars = TestVars::new(&[]);
+        assert!(parse("ABS()").is_err(), "arity is checked at parse time");
+        assert!(parse("ABS(1, 2)").is_err());
+        assert!(parse("SHL(1)").is_err());
+        assert!(parse("POW(2)").is_err());
+        assert!(parse("NOSUCH(1)").is_err());
+        assert!(parse("ABS(1").is_err(), "missing closing parenthesis");
+        assert!(parse("ABS 1)").is_err(), "missing opening parenthesis");
+        assert!(matches!(
+            evaluate("SHL(1, 32)", &vars),
+            Err(EvalError::BadArgument(_))
+        ));
+        assert!(matches!(
+            evaluate("SHL(1, 0 - 1)", &vars),
+            Err(EvalError::BadArgument(_))
+        ));
+        assert!(matches!(
+            evaluate("POW(2, 0 - 1)", &vars),
+            Err(EvalError::BadArgument(_))
+        ));
+        assert!(matches!(
+            evaluate("POW(2, 40)", &vars),
+            Err(EvalError::Overflow(_))
+        ));
+    }
+
+    #[test]
+    fn functions_nest_and_combine_with_operators() {
+        let vars = TestVars::new(&[("%MW0", Value::Word(6))]);
+        assert_eq!(
+            evaluate("SHL(1, 4) + ABS(0 - 1) + MIN(2, 3)", &vars),
+            Ok(Value::Word(19))
+        );
+        assert_eq!(parse("shl(1,4)").expect("parses").to_string(), "SHL(1, 4)");
+        assert_eq!(evaluate("MAX(SHL(1, 2), 3)", &vars), Ok(Value::Word(4)));
+        assert_eq!(evaluate("SHL(%MW0, 1)", &vars), Ok(Value::Word(12)));
     }
 }

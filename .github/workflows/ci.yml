@@ -56,5 +56,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev libudev-dev
+      # The M3 compatibility tests run against the upstream example projects.
+      # They skip themselves when the corpus is missing, so this step is what
+      # makes them actually run here.
+      - name: Fetch the ClassicLadder corpus
+        run: ./scripts/fetch_corpus.sh
       - name: Test
         run: cargo test --workspace

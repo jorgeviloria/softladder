@@ -104,6 +104,11 @@ Emitted by the scan engine and `lint`, surfaced in the editor's Problems panel a
 | `SL-W010` | Warning | The project has no rungs |
 | `SL-W011` | Warning | A rung is empty |
 | `SL-W020` | Warning | A simulation-bench widget addresses the wrong variable kind, or has an inverted range |
+| `SL-E030` | Error | A ClassicLadder document is malformed (bad container, unusable numbers, unparsable part) |
+| `SL-W030` | Warning | A ClassicLadder element or structure has no SoftLadder equivalent and was skipped or approximated |
+| `SL-W031` | Warning | A ClassicLadder variable family is not modelled (`%SW<n>`, deprecated timers/monostables) or an expression could not be translated |
+| `SL-W032` | Warning | A project part is passed through because SoftLadder does not model it |
+| `SL-W033` | Warning | A SoftLadder feature has no ClassicLadder equivalent and was not exported |
 
 `SL-E001`–`SL-E009` and `SL-W001`/`SL-W002` come from `softladder_core::lint` and the scan engine;
 `SL-E010`, `SL-W010` and `SL-W011` are project-level checks reported by `softladder lint`; and

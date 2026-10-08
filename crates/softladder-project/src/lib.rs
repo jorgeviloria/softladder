@@ -7,9 +7,10 @@
 //!   sniffs the gzip magic number, so both spellings load through one entry
 //!   point.
 //! * [`classicladder`] — the text container that ClassicLadder writes into
-//!   `.clprj` files (`_FILES_CLASSICLADDER` … `_/FILES_CLASSICLADDER`). The
-//!   container is parsed and serialized here; the element-level mapping between
-//!   container parts and a [`softladder_core::Project`] lands in M3.
+//!   `.clprj` files (`_FILES_CLASSICLADDER` … `_/FILES_CLASSICLADDER`): the
+//!   container is parsed and serialized here, and the element-level mapping
+//!   between container parts and a [`softladder_core::Project`] is implemented
+//!   by [`classicladder::import`] and [`classicladder::export`].
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]

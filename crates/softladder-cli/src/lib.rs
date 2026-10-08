@@ -30,7 +30,7 @@ use serde::Serialize;
 use softladder_core::ElementKind;
 use softladder_core::{Diagnostic, Project, ScanEngine, Severity};
 use softladder_io::{IoDriver, IoImage, SimDriver};
-use softladder_project::{classicladder, native, ProjectError};
+use softladder_project::{classicladder, native};
 use softladder_runtime::{Clock, Runtime};
 
 /// Exit code for a successful command.
@@ -405,65 +405,104 @@ fn structural_diagnostics(project: &Project) -> Vec<Diagnostic> {
 }
 
 fn import_project(args: &ImportArgs) -> i32 {
-    match classicladder::import_file(&args.input) {
-        Ok(project) => match native::save(&project, &args.output) {
-            Ok(()) => {
-                println!(
-                    "imported `{}` into `{}`",
-                    args.input.display(),
-                    args.output.display()
-                );
-                EXIT_OK
-            }
-            Err(error) => {
-                eprintln!("error: cannot write `{}`: {error}", args.output.display());
-                EXIT_USAGE
-            }
-        },
-        Err(ProjectError::NotYetImplemented(milestone)) => {
-            eprintln!(
-                "error: importing ClassicLadder projects is not implemented yet \
-                 (planned for {milestone}); the container of `{}` was read but its \
-                 element mapping is still a stub",
-                args.input.display()
-            );
-            EXIT_NOT_IMPLEMENTED
-        }
+    let report = match classicladder::import_file(&args.input) {
+        Ok(report) => report,
         Err(error) => {
             eprintln!("error: cannot import `{}`: {error}", args.input.display());
-            EXIT_USAGE
-        }
-    }
-}
-
-fn export_project(args: &ExportArgs) -> i32 {
-    let project = match native::load(&args.project) {
-        Ok(project) => project,
-        Err(error) => {
-            eprintln!("error: cannot load `{}`: {error}", args.project.display());
             return EXIT_USAGE;
         }
     };
-    match classicladder::export_file(&project, &args.output) {
-        Ok(()) => {
-            println!(
-                "exported `{}` into `{}`",
-                args.project.display(),
-                args.output.display()
-            );
-            EXIT_OK
+    print_diagnostics(&report.diagnostics);
+    if let Err(error) = native::save(&report.project, &args.output) {
+        eprintln!("error: cannot write `{}`: {error}", args.output.display());
+        return EXIT_USAGE;
+    }
+    println!(
+        "imported `{}` into `{}`",
+        args.input.display(),
+        args.output.display()
+    );
+    exit_for_diagnostics(&report.diagnostics)
+}
+
+fn export_project(args: &ExportArgs) -> i32 {
+    // The template is what keeps every part SoftLadder does not model alive.
+    // A `.clprj*` argument is imported first (and used as its own template);
+    // a native project starts from an empty document.
+    let (project, template, mut diagnostics) = match native::load(&args.project) {
+        Ok(project) => (project, classicladder::Document::empty(), Vec::new()),
+        Err(error) => {
+            if !is_classicladder_path(&args.project) {
+                eprintln!("error: cannot load `{}`: {error}", args.project.display());
+                return EXIT_USAGE;
+            }
+            let document = match std::fs::read(&args.project)
+                .map_err(|error| error.to_string())
+                .and_then(|bytes| {
+                    classicladder::Document::parse(&bytes).map_err(|error| error.to_string())
+                }) {
+                Ok(document) => document,
+                Err(error) => {
+                    eprintln!(
+                        "error: cannot read the container of `{}`: {error}",
+                        args.project.display()
+                    );
+                    return EXIT_USAGE;
+                }
+            };
+            match classicladder::import(&document) {
+                Ok(report) => (report.project, document, report.diagnostics),
+                Err(error) => {
+                    eprintln!("error: cannot import `{}`: {error}", args.project.display());
+                    return EXIT_USAGE;
+                }
+            }
         }
-        Err(ProjectError::NotYetImplemented(milestone)) => {
-            eprintln!(
-                "error: exporting to ClassicLadder format is not implemented yet \
-                 (planned for {milestone})"
-            );
-            EXIT_NOT_IMPLEMENTED
-        }
+    };
+    let report = match classicladder::export_file(&project, &template, &args.output) {
+        Ok(report) => report,
         Err(error) => {
             eprintln!("error: cannot export `{}`: {error}", args.output.display());
-            EXIT_USAGE
+            return EXIT_USAGE;
         }
+    };
+    diagnostics.extend(report.diagnostics);
+    print_diagnostics(&diagnostics);
+    println!(
+        "exported `{}` into `{}`",
+        args.project.display(),
+        args.output.display()
+    );
+    exit_for_diagnostics(&diagnostics)
+}
+
+/// `true` for the path spellings of a ClassicLadder container.
+fn is_classicladder_path(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            ["clp", "clprj", "clprjz"]
+                .iter()
+                .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+        })
+}
+
+/// Prints every diagnostic the way the CLI always has.
+fn print_diagnostics(diagnostics: &[Diagnostic]) {
+    for diagnostic in diagnostics {
+        println!("{diagnostic}");
+    }
+}
+
+/// `3` when any diagnostic is an error, `0` otherwise.
+fn exit_for_diagnostics(diagnostics: &[Diagnostic]) -> i32 {
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.severity == Severity::Error)
+    {
+        EXIT_DIAGNOSTICS
+    } else {
+        EXIT_OK
     }
 }
 
@@ -706,11 +745,138 @@ mod tests {
     }
 
     #[test]
-    fn import_exits_non_zero_while_it_is_a_stub() {
+    fn importing_a_missing_container_reports_usage() {
         let args = ImportArgs {
             input: PathBuf::from("/definitely/not/here.clprj"),
             output: PathBuf::from("/tmp/out.slprj"),
         };
         assert_eq!(import_project(&args), EXIT_USAGE);
+    }
+
+    #[test]
+    fn importing_a_corpus_project_writes_a_native_project() {
+        let Some(input) = corpus_project("example.clprj") else {
+            return;
+        };
+        let directory = TempDir::new();
+        let output = directory.path().join("example.slprj");
+        let args = ImportArgs {
+            input: input.clone(),
+            output: output.clone(),
+        };
+        assert_eq!(import_project(&args), EXIT_OK);
+        let project = native::load(&output).expect("the imported project loads");
+        assert_eq!(project.rungs.len(), 9);
+        assert_eq!(project.name, "Example project");
+    }
+
+    #[test]
+    fn importing_a_malformed_container_reports_an_error_diagnostic() {
+        let directory = TempDir::new();
+        let input = directory.path().join("bad.clprj");
+        // A container whose rung file carries a cell that cannot be read.
+        let part = "rung_0.csv";
+        let text = format!(
+            "_FILES_CLASSICLADDER\n_FILE-{part}\n#VER=3.0\nnot-a-cell\n_/FILE-{part}\n\
+             _/FILES_CLASSICLADDER\n"
+        );
+        std::fs::write(&input, text).expect("the fixture is written");
+        let args = ImportArgs {
+            input,
+            output: directory.path().join("bad.slprj"),
+        };
+        assert_eq!(import_project(&args), EXIT_DIAGNOSTICS);
+    }
+
+    #[test]
+    fn exporting_an_authored_project_writes_a_container() {
+        let directory = TempDir::new();
+        let output = directory.path().join("traffic.clprj");
+        let args = ExportArgs {
+            project: example_project(),
+            output: output.clone(),
+        };
+        assert_eq!(export_project(&args), EXIT_OK);
+        let document = classicladder::Document::parse(&std::fs::read(&output).expect("readable"))
+            .expect("the output is a container");
+        assert!(document.part("rung_1.csv").is_some());
+        // No template was given, so nothing is passed through.
+        assert!(document.part("com_params.txt").is_none());
+    }
+
+    #[test]
+    fn exporting_a_container_uses_it_as_its_own_template() {
+        let Some(input) = corpus_project("example.clprj") else {
+            return;
+        };
+        let directory = TempDir::new();
+        let output = directory.path().join("example.clprj");
+        let args = ExportArgs {
+            project: input,
+            output: output.clone(),
+        };
+        assert_eq!(export_project(&args), EXIT_OK);
+        let document = classicladder::Document::parse(&std::fs::read(&output).expect("readable"))
+            .expect("the output is a container");
+        assert!(document.part("rung_0.csv").is_some());
+        assert!(
+            document.part("com_params.txt").is_some(),
+            "the parts SoftLadder does not model are passed through"
+        );
+    }
+
+    #[test]
+    fn exporting_a_missing_project_reports_usage() {
+        let args = ExportArgs {
+            project: PathBuf::from("/definitely/not/here.slprj"),
+            output: PathBuf::from("/tmp/out.clprj"),
+        };
+        assert_eq!(export_project(&args), EXIT_USAGE);
+    }
+
+    /// A self-cleaning temporary directory, so the tests need no extra crate.
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new() -> Self {
+            use std::sync::atomic::{AtomicU64, Ordering};
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            let unique = format!(
+                "softladder-cli-{}-{}",
+                std::process::id(),
+                COUNTER.fetch_add(1, Ordering::Relaxed)
+            );
+            let path = std::env::temp_dir().join(unique);
+            std::fs::create_dir_all(&path).expect("the temporary directory is created");
+            Self { path }
+        }
+
+        fn path(&self) -> &std::path::Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    /// A corpus project, when the (git-ignored) corpus is present.
+    fn corpus_project(name: &str) -> Option<PathBuf> {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../testdata/classicladder-corpus/projects_examples")
+            .join(name);
+        if path.is_file() {
+            Some(path)
+        } else {
+            println!(
+                "note: `{}` is absent; run scripts/fetch_corpus.sh",
+                path.display()
+            );
+            None
+        }
     }
 }

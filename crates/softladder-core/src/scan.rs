@@ -41,7 +41,7 @@ use crate::diag::{Diagnostic, Severity};
 use crate::expr::{eval, parse, Value, VarSource};
 use crate::model::{
     CounterKind, ElementKind, PlacedElement, Project, RegisterMode, Rung, Section, SectionLanguage,
-    TimerMode,
+    TimerMode, WireMode,
 };
 use crate::vars::{Accessor, VarKind, VarRef};
 
@@ -117,7 +117,7 @@ pub enum TimeBase {
     Millis100,
     /// One second per unit.
     Second,
-    /// Sixty minutes per unit.
+    /// One minute per unit (`TIME_BASE_MINS` in the reference is 60 000 ms).
     Minute60,
 }
 
@@ -127,7 +127,7 @@ impl TimeBase {
         match self {
             TimeBase::Millis100 => 100,
             TimeBase::Second => 1_000,
-            TimeBase::Minute60 => 60 * 60 * 1_000,
+            TimeBase::Minute60 => 60 * 1_000,
         }
     }
 
@@ -136,7 +136,7 @@ impl TimeBase {
         match self {
             TimeBase::Millis100 => "100 ms",
             TimeBase::Second => "1 s",
-            TimeBase::Minute60 => "60 min",
+            TimeBase::Minute60 => "1 min",
         }
     }
 }
@@ -203,9 +203,16 @@ impl TimerIec {
 
     /// Sets the preset in time-base units.
     ///
-    /// Shrinking the preset below the already elapsed duration restarts the
-    /// timer, so that a lowered preset takes effect on the next count.
+    /// Raising the preset above the already elapsed duration re-arms a finished
+    /// timer, so a longer preset takes effect instead of being ignored; lowering
+    /// it to or below the elapsed duration leaves the timer finished. Setting the
+    /// value it already has is a no-op: the scan engine re-applies a block's
+    /// preset on every scan (so that an HMI edit is picked up), and treating that
+    /// as a change would restart an off delay that is counting down.
     pub fn set_preset(&mut self, preset: u64) {
+        if preset == self.preset {
+            return;
+        }
         self.preset = preset;
         if self.done && self.elapsed < self.preset {
             self.done = false;
@@ -1506,10 +1513,15 @@ impl Machine<'_> {
             // in mid-rung must not be fed from the rail — that is what `SL-W001`
             // warns about).
             for row in 0..rows {
-                let value = if grid.live_row(row) {
-                    self.state_on_left(grid, column, row)
-                } else {
+                let value = if !grid.live_row(row) {
+                    // A row with no elements is inert.
                     false
+                } else if grid.explicit_wires && !grid.cell_exists(column, row) {
+                    // Explicit wiring: only the cells that exist conduct, so a gap
+                    // in the middle of a row breaks the circuit (ClassicLadder).
+                    false
+                } else {
+                    self.state_on_left(grid, column, row)
                 };
                 if let Some(cell) = self.output_next.get_mut(row) {
                     *cell = value;
@@ -2324,6 +2336,10 @@ struct RungGrid {
     /// Index of this rung's first element in the flat element numbering used by
     /// the cell index and the edge history.
     element_base: usize,
+    /// `true` when a gap in a live row breaks the circuit
+    /// ([`WireMode::Explicit`], the ClassicLadder behaviour) instead of
+    /// conducting implicitly.
+    explicit_wires: bool,
 }
 
 impl RungGrid {
@@ -2502,6 +2518,7 @@ impl RungCache {
                 columns: max_col,
                 max_rows,
                 element_base: base,
+                explicit_wires: rung.wire_mode == WireMode::Explicit,
             });
         }
         cache
@@ -5100,5 +5117,149 @@ mod tests {
         set_bit(&mut engine, "%I3", true);
         engine.scan_once(10);
         assert_eq!(get(&engine, "%Q0"), Some(Value::Bit(true)));
+    }
+    fn rung_with_wires(id: u32, elements: Vec<PlacedElement>, wire_mode: WireMode) -> Rung {
+        Rung {
+            elements,
+            wire_mode,
+            ..Rung::new(id)
+        }
+    }
+
+    #[test]
+    fn implicit_wiring_conducts_through_gaps() {
+        // A row with a gap in the middle still works: the empty cell is a wire.
+        let mut engine = engine(vec![rung(
+            1,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                element(ElementKind::CoilOut, Some("%Q0"), 2, 0),
+            ],
+        )]);
+        set_bit(&mut engine, "%I0", true);
+        engine.scan_once(0);
+        assert_eq!(get(&engine, "%Q0"), Some(Value::Bit(true)));
+    }
+
+    #[test]
+    fn explicit_wiring_breaks_the_circuit_at_a_gap() {
+        // The same row in explicit mode (what an imported ClassicLadder project
+        // uses): the missing cell at column 1 breaks the circuit.
+        let mut gapped = engine(vec![rung_with_wires(
+            1,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                element(ElementKind::CoilOut, Some("%Q0"), 2, 0),
+            ],
+            WireMode::Explicit,
+        )]);
+        set_bit(&mut gapped, "%I0", true);
+        gapped.scan_once(0);
+        assert_eq!(
+            get(&gapped, "%Q0"),
+            Some(Value::Bit(false)),
+            "a gap must break an explicitly wired row"
+        );
+
+        // Filling the gap with a wire closes the circuit again.
+        let mut wired = engine(vec![rung_with_wires(
+            1,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                element(ElementKind::Connection, None, 1, 0),
+                element(ElementKind::CoilOut, Some("%Q0"), 2, 0),
+            ],
+            WireMode::Explicit,
+        )]);
+        set_bit(&mut wired, "%I0", true);
+        wired.scan_once(0);
+        assert_eq!(get(&wired, "%Q0"), Some(Value::Bit(true)));
+    }
+
+    #[test]
+    fn explicit_wiring_keeps_the_start_stop_seal() {
+        // A ClassicLadder project wires its seal with explicit connection cells
+        // and a free cell carrying the vertical link, so the seal must still hold
+        // and the stop contact must still break it.
+        let mut sealed = engine(vec![rung_with_wires(
+            1,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                element(ElementKind::ContactNc, Some("%I2"), 1, 0),
+                element(ElementKind::Connection, None, 2, 0),
+                element(ElementKind::ContactNo, Some("%Q0"), 0, 1),
+                // The seal joins the stop contact's input side, which is the
+                // column the branches merge in.
+                linked(ElementKind::Connection, None, 1, 1),
+                element(ElementKind::CoilOut, Some("%Q0"), 3, 0),
+            ],
+            WireMode::Explicit,
+        )]);
+        set_bit(&mut sealed, "%I0", true);
+        sealed.scan_once(0);
+        assert_eq!(get(&sealed, "%Q0"), Some(Value::Bit(true)));
+
+        set_bit(&mut sealed, "%I0", false);
+        sealed.scan_once(10);
+        assert_eq!(
+            get(&sealed, "%Q0"),
+            Some(Value::Bit(true)),
+            "the seal holds through the explicit wires"
+        );
+
+        set_bit(&mut sealed, "%I2", true);
+        sealed.scan_once(20);
+        assert_eq!(get(&sealed, "%Q0"), Some(Value::Bit(false)));
+    }
+    #[test]
+    fn reconfiguring_a_timer_with_the_same_preset_does_not_restart_it() {
+        // The scan engine re-applies a block's preset on every scan, so that an
+        // HMI edit is picked up. That must not disturb a delay that is already
+        // counting down: before this was a no-op, an off-delay dropped its
+        // output the moment its input fell.
+        let mut timer = TimerIec::new(TimerMode::Off, 2, TimeBase::Minute60);
+        // The input is high, so the output follows it.
+        assert!(timer.update(0, true));
+        // Falling edge: the off delay starts, and the output must stay on.
+        assert!(timer.update(1_000, false));
+        for _ in 0..118 {
+            let output = timer.update(1_000, false);
+            timer.configure(timer.preset, timer.time_base);
+            assert!(output, "the off delay must hold through its preset");
+        }
+        // Exactly 120 000 ms of counting: two one-minute units.
+        let output = timer.update(1_000, false);
+        assert!(!output, "the off delay expires at its preset");
+        assert_eq!(timer.preset, 2);
+        assert_eq!(TimeBase::Minute60.millis(), 60_000);
+    }
+
+    #[test]
+    fn raising_a_preset_re_arms_a_finished_timer() {
+        let mut timer = TimerIec::new(TimerMode::On, 3, TimeBase::Millis100);
+        for _ in 0..3 {
+            timer.update(100, true);
+        }
+        assert!(timer.done);
+
+        // Raising the preset above the elapsed time must let the timer run again,
+        // otherwise a longer preset would be ignored for ever.
+        timer.set_preset(5);
+        assert!(!timer.done, "a raised preset re-arms the timer");
+        assert_eq!(timer.preset, 5);
+
+        // Lowering it to or below the elapsed time leaves it finished: the timer
+        // is already past the new preset.
+        for _ in 0..5 {
+            timer.update(100, true);
+        }
+        assert!(timer.done);
+        timer.set_preset(1);
+        assert!(timer.done, "a timer already past the new preset stays done");
+        assert_eq!(timer.preset, 1);
+
+        // Setting the same value again is a no-op.
+        timer.set_preset(1);
+        assert!(timer.done);
     }
 }

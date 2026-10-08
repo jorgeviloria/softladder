@@ -23,8 +23,11 @@
 //! | `SL-W002` | warning | an SFC section was skipped (engine lands in M4) |
 //!
 //! The CLI adds the project-level `SL-E010` (duplicate id), `SL-W010` (no rungs)
-//! and `SL-W011` (empty rung), and `softladder-edit` adds `SL-W020` for a
-//! simulation-bench widget that addresses the wrong kind of variable.
+//! and `SL-W011` (empty rung); `softladder-edit` adds `SL-W020` for a
+//! simulation-bench widget that addresses the wrong kind of variable; and the
+//! ClassicLadder importer/exporter adds `SL-E030` (malformed document) and
+//! `SL-W030`–`SL-W033` (skipped/approximated element, unmodelled variable
+//! family or expression, passed-through part, non-exportable feature).
 
 use std::fmt;
 

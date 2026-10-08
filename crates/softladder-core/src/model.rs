@@ -196,6 +196,9 @@ pub struct Rung {
     pub comment: String,
     /// Elements placed on the rung, in no particular order.
     pub elements: Vec<PlacedElement>,
+    /// How empty cells behave in this rung; see [`WireMode`].
+    #[serde(default)]
+    pub wire_mode: WireMode,
 }
 
 impl Rung {
@@ -223,6 +226,21 @@ impl Rung {
             .max()
             .map_or(1, |max| max.saturating_add(1))
     }
+}
+
+/// How an empty cell behaves inside a *live* row (a row that holds at least one
+/// element).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum WireMode {
+    /// Empty cells conduct: the row is wired implicitly, so gaps do not break the
+    /// circuit. This is what the editor produces when elements are placed apart
+    /// from each other, and the default for projects authored in SoftLadder.
+    #[default]
+    Implicit,
+    /// Only explicit [`ElementKind::Connection`] cells conduct and a gap breaks
+    /// the circuit. ClassicLadder behaves this way, so imported projects are
+    /// switched to this mode to keep their behaviour identical.
+    Explicit,
 }
 
 /// Language a section is written in.

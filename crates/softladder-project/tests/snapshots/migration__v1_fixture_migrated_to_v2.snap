@@ -115,7 +115,8 @@ expression: value
         }
       ],
       "id": 1,
-      "label": "mixed v1 variables"
+      "label": "mixed v1 variables",
+      "wire_mode": "Implicit"
     }
   ],
   "scan": {

@@ -43,7 +43,13 @@ rebuilds everything around it:
 
 ## Status
 
-**M2 complete — the editor works.** What you can do today:
+**M3 complete — your ClassicLadder projects work.** What you can do today:
+
+- **import and export ClassicLadder projects** (`.clp`, `.clprj`, `.clprjz`), validated against all
+  41 upstream example projects: every one imports, `import → export → import` is a fixed point, and
+  the parts SoftLadder does not model (Modbus and serial configuration, IO mapping, alarm slots, …)
+  survive byte for byte. What cannot be represented is reported with a located diagnostic, never
+  dropped silently ([`docs/COMPAT.md`](docs/COMPAT.md), [`testdata/known-divergences.md`](testdata/known-divergences.md));
 
 - open, edit and save ladder programs in the desktop editor, with unlimited undo/redo, an element
   palette, variable validation, problems list and live power-flow indication
@@ -61,7 +67,7 @@ rebuilds everything around it:
 | M0 ✅ | Repo, workspace, CI, plan, ADRs |
 | M1 ✅ | Core: variable accessors, expressions, function blocks, real power flow, diagnostics |
 | M2 ✅ | egui editor: element palette, undo/redo, simulation bench, problems, live power flow |
-| M3 | ClassicLadder import/export + golden corpus parity |
+| M3 ✅ | ClassicLadder import/export + golden-corpus round trip |
 | M4 | SFC/Grafcet model, engine and editor |
 | M5 | IO: simulator scripting, Modbus TCP master/slave, then RTU |
 | M6 | Online monitor, web dashboard, alarms and journal |
@@ -81,6 +87,8 @@ cargo run -p softladder-ui        # desktop editor (run it from the repo root)
 cargo run -p softladder-cli -- run examples/traffic_light.slprj --cycles 500   # deterministic
 cargo run -p softladder-cli -- run examples/traffic_light.slprj --real-time    # wall-clock pacing
 cargo run -p softladder-cli -- lint examples/traffic_light.slprj
+cargo run -p softladder-cli -- import my_project.clprj -o my_project.slprj
+cargo run -p softladder-cli -- export my_project.slprj -o my_project.clprj
 cargo run -p softladder-cli -- --help
 ```
 
@@ -119,7 +127,8 @@ testdata/                    golden corpus (fetched, not vendored)
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Crate boundaries, data flow, invariants, engineering conventions |
 | [`docs/FORMAT.md`](docs/FORMAT.md) | Native `.slprj` schema and migration rules |
 | [`docs/COMPAT.md`](docs/COMPAT.md) | ClassicLadder container/parts format, variable and element mapping |
-| [`docs/ELEMENTS.md`](docs/ELEMENTS.md) | Element library and its serialization parameters |
+| [`docs/ELEMENTS.md`](docs/ELEMENTS.md) | Element library, its serialization parameters and every diagnostic code |
+| [`testdata/known-divergences.md`](testdata/known-divergences.md) | Where an imported project behaves differently from ClassicLadder, and why |
 | [`docs/adr/`](docs/adr) | Architecture decision records (licensing, UI stack, format, clean-room, oracle tests, monitor) |
 
 ## License

@@ -91,9 +91,17 @@ canonical form, so parsing `%B0` yields `%M0` and parsing `%TM0` yields `%TM0.Q`
 recursion without a depth limit. The AST is evaluated against a `VarSource` trait, which keeps it
 decoupled from storage and trivially mockable in tests.
 
-Supported (M1): integer/real literals, variable references, `+ - * / %`, `= <> < <= > >=`,
-`AND OR XOR NOT`, parentheses, and explicit casts. Function library (`ABS MIN MAX LIMIT SEL MUX
-SCALE NORM SIN COS SQRT`) lands with M9 extras; the parser is designed to accept them from the start.
+Supported: integer/real literals, hexadecimal literals in ClassicLadder's `$8000` spelling (and
+`0x8000`), variable references (including indexed and accessor forms), `+ - * / %`, `= <> < <= > >=`,
+`AND OR XOR NOT` (with `&`/`|` accepted for `AND`/`OR`, which is how ClassicLadder writes them), and
+parentheses.
+
+Function library: `ABS`, `MIN`, `MAX`, `AVG`, `POW`, `SHL`, `SHR`, `ROL`, `ROR` — with the
+ClassicLadder aliases `MINI`, `MAXI` and `MOY` accepted, and the shifts/rotates matching the
+reference's 32-bit behaviour (a logical shift right shifts zeros in; `ROL`/`ROR` rotate). The
+remaining M9 math (`SCALE`, `NORM`, `SIN`, `COS`, `SQRT`) plugs into the same `Function` enum.
+Every function checks its arity at parse time and its argument domain at evaluation time, returning
+`EvalError::BadArgument`/`Overflow` instead of panicking.
 
 ## 6. Ladder semantics
 

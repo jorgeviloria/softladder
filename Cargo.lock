@@ -3209,6 +3209,7 @@ version = "0.0.1"
 dependencies = [
  "flate2",
  "insta",
+ "proptest",
  "serde_json",
  "softladder-core",
  "tempfile",

@@ -16,3 +16,5 @@ flate2 = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 insta = { workspace = true }
+proptest = { workspace = true }
+flate2 = { workspace = true }

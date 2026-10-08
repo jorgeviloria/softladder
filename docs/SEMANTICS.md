@@ -14,10 +14,14 @@ A rung is a grid of cells addressed by `(col, row)`, both zero-based, `col` grow
 
 Each cell holds at most one [`PlacedElement`]. Two connectivity rules matter:
 
-- **Horizontal flow is implicit.** A row that contains at least one element is *live*: an empty cell
-  in a live row conducts exactly what a `Connection` cell would carry, i.e. `state_on_left` of that
-  cell — including the vertical merge described below. A row with no elements at all is *inert*: it
-  never conducts, so it cannot inject power into a vertical link.
+- **Horizontal flow depends on the rung's wire mode** ([`Rung::wire_mode`]). A row that contains at
+  least one element is *live*; a row with no elements at all is *inert*: it never conducts, so it
+  cannot inject power into a vertical link.
+  * `Implicit` (the default, and what the editor authors): an empty cell in a live row conducts
+    exactly what a `Connection` cell would carry, i.e. `state_on_left` of that cell — including the
+    vertical merge described below.
+  * `Explicit` (ClassicLadder's behaviour, set on every imported rung): only cells that exist
+    conduct, so a gap in the middle of a live row breaks the circuit.
   An empty cell in **column 0 is not the power rail**: only a cell that exists in column 0 touches
   the rail. That is what makes a branch that taps into the middle of a rung possible — the branch
   starts empty in column 0 and receives its power through the vertical link instead of from the
