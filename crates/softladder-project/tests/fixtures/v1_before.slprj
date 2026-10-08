@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "name": "v1 fixture",
+  "author": "SoftLadder tests",
+  "comment": "Hand-written schema v1 document: bit selections, .V kinds, a nested index_expr and a symbol without a variable binding.",
+  "sections": [
+    {
+      "id": 1,
+      "name": "Main",
+      "language": "Ladder",
+      "subroutine": null,
+      "rungs": [1]
+    }
+  ],
+  "rungs": [
+    {
+      "id": 1,
+      "label": "mixed v1 variables",
+      "comment": "Every VarRef position the v1 to v2 migration has to reach.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "MemWord", "index": 0, "index_expr": null, "bit": 3 }, "col": 0, "row": 0, "params": [] },
+        { "kind": { "Timer": { "mode": "On" } }, "var": { "kind": "TimerIecValue", "index": 0, "index_expr": null, "bit": null }, "col": 1, "row": 0, "params": ["3000"] },
+        { "kind": { "Counter": { "kind": "Up" } }, "var": { "kind": "CounterValue", "index": 0, "index_expr": null, "bit": null }, "col": 2, "row": 0, "params": ["5"] },
+        { "kind": "Compare", "var": { "kind": "MemWord", "index": 0, "index_expr": { "kind": "MemWord", "index": 1, "index_expr": { "kind": "MemWord", "index": 2, "index_expr": null, "bit": 4 }, "bit": null }, "bit": null }, "col": 3, "row": 0, "params": ["%MW0", "=", "10"] },
+        { "kind": "CoilOut", "var": { "kind": "MemBit", "index": 0, "index_expr": null, "bit": null }, "col": 4, "row": 0, "params": [] },
+        { "kind": "Connection", "var": null, "col": 5, "row": 0, "params": [] }
+      ]
+    }
+  ],
+  "symbols": [
+    { "name": "unbound", "comment": "Declared without a variable binding", "unit": null },
+    { "name": "word_bit", "var": { "kind": "MemWord", "index": 3, "index_expr": null, "bit": 7 }, "comment": "Bit 7 of %MW3", "unit": null }
+  ],
+  "scan": {
+    "period_ms": 20,
+    "input_period_ms": 10
+  }
+}

@@ -1,0 +1,159 @@
+---
+source: crates/softladder-project/tests/migration.rs
+assertion_line: 113
+expression: value
+---
+{
+  "author": "SoftLadder tests",
+  "comment": "Hand-written schema v1 document: bit selections, .V kinds, a nested index_expr and a symbol without a variable binding.",
+  "name": "v1 fixture",
+  "rungs": [
+    {
+      "comment": "Every VarRef position the v1 to v2 migration has to reach.",
+      "elements": [
+        {
+          "col": 0,
+          "connected_with_top": false,
+          "kind": "ContactNo",
+          "params": [],
+          "row": 0,
+          "var": {
+            "accessor": {
+              "Bit": 3
+            },
+            "index": 0,
+            "index_expr": null,
+            "kind": "MemWord"
+          }
+        },
+        {
+          "col": 1,
+          "connected_with_top": false,
+          "kind": {
+            "Timer": {
+              "mode": "On"
+            }
+          },
+          "params": [
+            "3000"
+          ],
+          "row": 0,
+          "var": {
+            "accessor": "Value",
+            "index": 0,
+            "index_expr": null,
+            "kind": "TimerIec"
+          }
+        },
+        {
+          "col": 2,
+          "connected_with_top": false,
+          "kind": {
+            "Counter": {
+              "kind": "Up"
+            }
+          },
+          "params": [
+            "5"
+          ],
+          "row": 0,
+          "var": {
+            "accessor": "Value",
+            "index": 0,
+            "index_expr": null,
+            "kind": "Counter"
+          }
+        },
+        {
+          "col": 3,
+          "connected_with_top": false,
+          "kind": "Compare",
+          "params": [
+            "%MW0",
+            "=",
+            "10"
+          ],
+          "row": 0,
+          "var": {
+            "accessor": null,
+            "index": 0,
+            "index_expr": {
+              "accessor": null,
+              "index": 1,
+              "index_expr": {
+                "accessor": {
+                  "Bit": 4
+                },
+                "index": 2,
+                "index_expr": null,
+                "kind": "MemWord"
+              },
+              "kind": "MemWord"
+            },
+            "kind": "MemWord"
+          }
+        },
+        {
+          "col": 4,
+          "connected_with_top": false,
+          "kind": "CoilOut",
+          "params": [],
+          "row": 0,
+          "var": {
+            "accessor": null,
+            "index": 0,
+            "index_expr": null,
+            "kind": "MemBit"
+          }
+        },
+        {
+          "col": 5,
+          "connected_with_top": false,
+          "kind": "Connection",
+          "params": [],
+          "row": 0,
+          "var": null
+        }
+      ],
+      "id": 1,
+      "label": "mixed v1 variables"
+    }
+  ],
+  "scan": {
+    "input_period_ms": 10,
+    "period_ms": 20
+  },
+  "schema_version": 2,
+  "sections": [
+    {
+      "id": 1,
+      "language": "Ladder",
+      "name": "Main",
+      "rungs": [
+        1
+      ],
+      "subroutine": null
+    }
+  ],
+  "symbols": [
+    {
+      "comment": "Declared without a variable binding",
+      "name": "unbound",
+      "unit": null,
+      "var": null
+    },
+    {
+      "comment": "Bit 7 of %MW3",
+      "name": "word_bit",
+      "unit": null,
+      "var": {
+        "accessor": {
+          "Bit": 7
+        },
+        "index": 3,
+        "index_expr": null,
+        "kind": "MemWord"
+      }
+    }
+  ]
+}

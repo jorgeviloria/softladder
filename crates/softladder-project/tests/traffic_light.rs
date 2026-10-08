@@ -17,10 +17,10 @@ fn example_path() -> PathBuf {
 fn traffic_light_example_loads() {
     let project = native::load(&example_path()).expect("example project loads");
 
-    assert_eq!(project.schema_version, 1);
+    assert_eq!(project.schema_version, native::CURRENT_SCHEMA_VERSION);
     assert_eq!(project.name, "traffic_light");
     assert_eq!(project.sections.len(), 1);
-    assert!(project.rungs.len() >= 2, "expected at least two rungs");
+    assert_eq!(project.rungs.len(), 4, "the example has four rungs");
 
     let section = &project.sections[0];
     assert_eq!(section.name, "Main");

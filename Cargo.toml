@@ -34,3 +34,4 @@ egui = "0.31"
 
 # Test-only helpers
 tempfile = "3.10"
+insta = { version = "1.40", features = ["json"] }

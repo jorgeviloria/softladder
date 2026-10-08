@@ -60,23 +60,35 @@ several legacy parts at `1.0`.
 
 ## 3. Variable mapping
 
-| ClassicLadder | SoftLadder | Notes |
-| --- | --- | --- |
-| `%B<n>` | `%M<n>` | memory bit |
-| `%W<n>` | `%MW<n>` | memory word |
-| `%I<n>` / `%Q<n>` | `%I<n>` / `%Q<n>` | physical digital |
-| `%IW<n>` / `%QW<n>` | `%IW<n>` / `%QW<n>` | physical analog |
-| `%TM<n>` | `%TM<n>` | IEC timer instance |
-| `%C<n>` | `%C<n>` | counter instance |
-| `%R<n>` | `%R<n>` | register (FIFO/LIFO) |
-| `%X<n>` | `%X<n>` | SFC step |
-| `%S<n>` | `%S<n>` | system variable |
-| `%QLED<n>` | `%QLED<n>` | user LED |
-| legacy `%T<n>` / `%M<n>` timers-monostables | import as a `TON` FB | deprecated in ClassicLadder; reported as a warning |
+ClassicLadder declares its variables in a name table (`vars_names_list.c`); the spellings below are
+authoritative, and SoftLadder's namespace is a superset of them. The `accessor` column refers to
+[`FORMAT.md`](FORMAT.md) §"Accessors (schema v2)".
+
+| ClassicLadder | SoftLadder (`kind`) | `accessor` | Notes |
+| --- | --- | --- | --- |
+| `%B<n>` | `MemBit` | — | bit memory; `%M<n>` is the canonical spelling |
+| `%W<n>` | `MemWord` | — | word memory; `%MW<n>` canonical |
+| `%I<n>` / `%Q<n>` | `PhysIn` / `PhysOut` | — | physical digital |
+| `%IW<n>` / `%QW<n>` | `PhysInWord` / `PhysOutWord` | — | physical analog |
+| `%QLED<n>` | `Led` | — | user LED |
+| `%S<n>` | `System` | — | system bit |
+| `%SW<n>` | *(pending)* | — | system word: **not yet modelled**, import reports a warning |
+| `%TM<n>.Q` | `TimerIec` | `Done` (`null` accepted) | timer output; bare `%TM<n>` means the same |
+| `%TM<n>.P` | `TimerIec` | `Preset` | |
+| `%TM<n>.V` | `TimerIec` | `Value` | elapsed, in time-base units |
+| `%C<n>.D` | `Counter` | `Done` (`null` accepted) | done bit |
+| `%C<n>.E` / `%C<n>.F` | `Counter` | `Empty` / `Full` | wrap-around indicators, see [`SEMANTICS.md`](SEMANTICS.md) §3.6 |
+| `%C<n>.P` / `%C<n>.V` | `Counter` | `Preset` / `Value` | |
+| `%R<n>.E` / `%R<n>.F` | `Register` | `Empty` / `Full` | |
+| `%R<n>.I` / `%R<n>.O` | `Register` | `In` / `Out` | value pushed / popped |
+| `%R<n>.S` | `Register` | `Count` | number of stored values |
+| `%X<n>.A` / `%X<n>.V` | `Step` | `Activity` / `Value` | SFC step activity and time |
+| legacy `%T<n>.D/.R/.P/.V` | `TimerIec` | `Done` / — / `Preset` / `Value` | old timer family; imported as an IEC timer with a warning (`%T<n>.R` has no equivalent) |
+| legacy `%M<n>.R/.P/.V` | `TimerIec` | — / `Preset` / `Value` | old monostable family; imported as a pulse timer with a warning |
 
 Indexed variables (ClassicLadder's `IndexedVarType` / `IndexedVarNum`) map to
-`VarRef::index_expr`. Bit extraction (`%W20:X4`, on the original TODO) has no ClassicLadder
-equivalent and is therefore export-blocked with a clear diagnostic.
+`VarRef::index_expr`. Bit extraction (`%W20.3`, which ClassicLadder has only on its TODO list) is a
+SoftLadder extension and therefore cannot be exported; it is reported as a warning.
 
 ## 4. Element mapping (ladder)
 
@@ -100,6 +112,20 @@ equivalent and is therefore export-blocked with a clear diagnostic.
 
 `StrRung.NbrLinesUsed` (the rung's used height) is preserved so the editor can keep the original
 vertical extent instead of always drawing 8 rows.
+
+### Block geometry
+
+ClassicLadder draws function blocks over several cells: timers and counters are two columns wide with
+the "alive" cell on the right and their input pins reading the flow arriving at the *previous*
+column, rows `y`, `y+1`, … Register blocks are two columns by three rows, and compare/operate blocks
+span three columns with their power tapped two columns to the left.
+
+SoftLadder normalizes all of them to **one cell per block** whose inputs are the flow arriving at
+the rows starting at its own `(col, row)` — see [`SEMANTICS.md`](SEMANTICS.md) §3.4–3.7 for the exact
+per-element row layout and the list of deliberate divergences. Because empty cells in a live row are
+wires, the normalized form evaluates identically as long as the imported rung's intervening cells
+were wires, which is the case in every project in the corpus; the import report flags any case where
+it is not. On export, the multi-cell form is re-materialized (wires plus `ELE_UNUSABLE` body cells).
 
 ## 5. Import / export rules
 

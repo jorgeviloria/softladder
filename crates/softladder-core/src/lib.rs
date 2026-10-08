@@ -28,6 +28,9 @@ pub use model::{
     CounterKind, ElementKind, PlacedElement, Project, RegisterMode, Rung, ScanConfig, Section,
     SectionLanguage, Symbol, TimerMode, SCHEMA_VERSION,
 };
-pub use scan::{Counter, EdgeBank, ScanEngine, ScanReport, StoreError, TimerIec, VarStore};
+pub use scan::{
+    lint, Counter, EdgeBank, RegisterState, ScanEngine, ScanReport, StoreError, TimeBase, TimerIec,
+    VarStore,
+};
 pub use sfc::{SequentialPage, Step, Transition};
-pub use vars::{VarKind, VarParseError, VarRef};
+pub use vars::{Accessor, VarKind, VarParseError, VarRef};

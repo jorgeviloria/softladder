@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — M1 core
+
+### Added
+
+- `docs/SEMANTICS.md`: normative specification of ladder execution (grid, power
+  flow, every element, scan structure, diagnostics) derived from the observable
+  behaviour of the reference implementation.
+- Schema v2 of `.slprj`: variable references carry an `accessor`
+  (`%TM0.Q`, `%TM0.V`, `%TM0.P`, `%C1.D/.V/.P/.E/.F`, `%R0.E/.F/.I/.O/.S`,
+  `%X2.A/.V`, `%MW0.3`) instead of the v1 `bit` field, plus a
+  direct v1 -> v2 migration chain (`MIGRATIONS`, gzip-aware, idempotent,
+  snapshot-tested) and rejection of future schema versions.
+- `Symbol::var`: symbols bind to a variable, with backwards-compatible
+  deserialization.
+- `PlacedElement::connected_with_top`: vertical links that build parallel
+  branches and their merge points.
+- `softladder-core::lint`: structural diagnostics (`SL-E003`, `SL-E005`,
+  `SL-E007`, `SL-E009`, `SL-W001`, `SL-W002`) shared by the CLI and, later, the
+  editor and the monitor.
+- Deterministic simulated time: `softladder-runtime::Clock`
+  (`Simulated`/`Realtime`), `Runtime::run_cycles`, `ScanSummary`, and
+  `softladder run` defaulting to simulated time with byte-identical `--json`
+  output across runs. `--real-time` opts back into wall-clock pacing.
+
+### Changed
+
+- The scan engine is a full column-major power-flow evaluator: parallel branches
+  with vertical merges, implicit horizontal wires in live rows, serial coils,
+  per-cell edge detection, compare/operate blocks, IEC timers with three modes
+  and time bases (100 ms / 1 s / 60 min), counters with reset/preset/up/down
+  input rows and wrap flags, FIFO/LIFO registers, jumps by rung index or label
+  and recursive subroutine calls with a 25-frame limit.
+- `examples/traffic_light.slprj` is a v2 document and uses a real vertical link
+  for its self-holding rung; the CLI `lint` reports the core diagnostics.
+
 ## [Unreleased] — M0 skeleton
 
 ### Added

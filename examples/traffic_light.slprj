@@ -1,55 +1,68 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "traffic_light",
   "author": "SoftLadder contributors",
-  "comment": "Minimal traffic-light / start-stop example used by the tests and by the editor at start-up.",
+  "comment": "Traffic-light / start-stop example used by the tests and by the editor at start-up.",
   "sections": [
     {
       "id": 1,
       "name": "Main",
       "language": "Ladder",
       "subroutine": null,
-      "rungs": [1, 2, 3]
+      "rungs": [1, 2, 3, 4]
     }
   ],
   "rungs": [
     {
       "id": 1,
-      "label": "start / self-hold",
-      "comment": "The start button %I0 latches the green lamp %Q0 through its own contact.",
+      "label": "start_stop",
+      "comment": "Start/stop with self-hold: %I0 starts, %I2 stops, %Q0 lamps. Rows 0 and 1 are parallel branches merged at column 1 by the vertical link (connected_with_top).",
       "elements": [
-        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 0, "index_expr": null, "bit": null }, "col": 0, "row": 0, "params": [] },
-        { "kind": "ContactNo", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "bit": null }, "col": 1, "row": 1, "params": [] },
-        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "bit": null }, "col": 2, "row": 0, "params": [] }
+        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 0, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNc", "var": { "kind": "PhysIn", "index": 2, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNo", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null }, "col": 0, "row": 1, "connected_with_top": false, "params": [] },
+        { "kind": "Connection", "var": null, "col": 1, "row": 1, "connected_with_top": true, "params": [] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null }, "col": 2, "row": 0, "connected_with_top": false, "params": [] }
       ]
     },
     {
       "id": 2,
-      "label": "amber after 3 s",
+      "label": "amber_after_3s",
       "comment": "TON %TM0 delays the amber lamp %Q1 by 3000 ms after the green lamp is on.",
       "elements": [
-        { "kind": "ContactNo", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "bit": null }, "col": 0, "row": 0, "params": [] },
-        { "kind": { "Timer": { "mode": "On" } }, "var": { "kind": "TimerIec", "index": 0, "index_expr": null, "bit": null }, "col": 1, "row": 0, "params": ["3000"] },
-        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "bit": null }, "col": 2, "row": 0, "params": [] }
+        { "kind": "ContactNo", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": { "Timer": { "mode": "On" } }, "var": { "kind": "TimerIec", "index": 0, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": ["3000"] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "accessor": null }, "col": 2, "row": 0, "connected_with_top": false, "params": [] }
       ]
     },
     {
       "id": 3,
-      "label": "vehicle counter",
-      "comment": "CTU %C0 counts %I1 and, once five vehicles passed, mirrors the done bit on %M0 and bumps %MW0.",
+      "label": "vehicle_counter",
+      "comment": "CTU %C0 counts rising edges of %I1 with preset 5 (%C0.P) and sets its done bit %C0.D at five vehicles.",
       "elements": [
-        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 1, "index_expr": null, "bit": null }, "col": 0, "row": 0, "params": [] },
-        { "kind": { "Counter": { "kind": "Up" } }, "var": { "kind": "Counter", "index": 0, "index_expr": null, "bit": null }, "col": 1, "row": 0, "params": ["5"] },
-        { "kind": "Operate", "var": null, "col": 2, "row": 0, "params": ["%MW0", "=", "%MW0 + 1"] },
-        { "kind": "CoilOut", "var": { "kind": "MemBit", "index": 0, "index_expr": null, "bit": null }, "col": 3, "row": 0, "params": [] }
+        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 1, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": { "Counter": { "kind": "Up" } }, "var": { "kind": "Counter", "index": 0, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": ["5"] }
+      ]
+    },
+    {
+      "id": 4,
+      "label": "publish_count",
+      "comment": "On the rising edge of the counter done bit, latch %M0 and copy the current count into %MW0 with an operate block.",
+      "elements": [
+        { "kind": "ContactRising", "var": { "kind": "Counter", "index": 0, "index_expr": null, "accessor": "Done" }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "CoilSet", "var": { "kind": "MemBit", "index": 0, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNo", "var": { "kind": "MemBit", "index": 0, "index_expr": null, "accessor": null }, "col": 0, "row": 1, "connected_with_top": false, "params": [] },
+        { "kind": "Operate", "var": null, "col": 1, "row": 1, "connected_with_top": false, "params": ["%MW0", "=", "%C0.V"] }
       ]
     }
   ],
   "symbols": [
-    { "name": "start_button", "comment": "Start / acknowledge push-button", "unit": null },
-    { "name": "green_lamp", "comment": "Traffic light, green aspect", "unit": null },
-    { "name": "amber_lamp", "comment": "Traffic light, amber aspect", "unit": null },
-    { "name": "vehicle_count", "comment": "Vehicles seen since the counter was reset", "unit": "veh" }
+    { "name": "start_button", "var": { "kind": "PhysIn", "index": 0, "index_expr": null, "accessor": null }, "comment": "Start / acknowledge push-button", "unit": null },
+    { "name": "vehicle_trigger", "var": { "kind": "PhysIn", "index": 1, "index_expr": null, "accessor": null }, "comment": "Vehicle detection loop", "unit": null },
+    { "name": "stop_button", "var": { "kind": "PhysIn", "index": 2, "index_expr": null, "accessor": null }, "comment": "Stop push-button, wired normally closed", "unit": null },
+    { "name": "green_lamp", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null }, "comment": "Traffic light, green aspect", "unit": null },
+    { "name": "amber_lamp", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "accessor": null }, "comment": "Traffic light, amber aspect", "unit": null },
+    { "name": "vehicle_count", "var": { "kind": "MemWord", "index": 0, "index_expr": null, "accessor": null }, "comment": "Vehicles seen when the counter reached its preset", "unit": "veh" }
   ],
   "scan": {
     "period_ms": 10,

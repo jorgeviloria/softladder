@@ -3,15 +3,16 @@
 //! Four subcommands are available:
 //!
 //! * `run <project>` — loads a project and drives a [`Runtime`] for a number of
-//!   scans, with the simulated clock taken from the real elapsed time and the
-//!   loop paced by `--period-ms`.
+//!   scans. By default the scans use **simulated** time (`now_ms` advances by
+//!   exactly `--period-ms` per cycle), which makes the run reproducible and
+//!   fast; `--real-time` opts into wall-clock pacing with a sleep.
 //! * `lint <project>` — loads a project, runs one scan and reports every
 //!   diagnostic it can find without executing hardware.
 //! * `import <clprj> -o <slprj>` — ClassicLadder import, scheduled for M3.
 //! * `export <slprj> -o <clprj>` — ClassicLadder export, scheduled for M3.
 //!
-//! Besides the codes documented in `softladder_core::diag`, `lint` reports the
-//! structural codes `SL-E010` (duplicate id) and `SL-W010`/`SL-W011` (empty
+//! Besides the codes documented in `docs/ELEMENTS.md`, `lint` reports the
+//! project-level codes `SL-E010` (duplicate id) and `SL-W010`/`SL-W011` (empty
 //! project / empty rung).
 //!
 //! Exit codes: `0` success, `1` usage or I/O problem, `2` feature not
@@ -22,14 +23,15 @@
 
 use std::ffi::OsString;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
 
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
-use softladder_core::{Diagnostic, ElementKind, Project, ScanEngine, Severity};
+#[cfg(test)]
+use softladder_core::ElementKind;
+use softladder_core::{Diagnostic, Project, ScanEngine, Severity};
 use softladder_io::{IoDriver, IoImage, SimDriver};
 use softladder_project::{classicladder, native, ProjectError};
-use softladder_runtime::Runtime;
+use softladder_runtime::{Clock, Runtime};
 
 /// Exit code for a successful command.
 pub const EXIT_OK: i32 = 0;
@@ -75,9 +77,14 @@ pub struct RunArgs {
     /// Number of scans to execute.
     #[arg(long, default_value_t = 100)]
     pub cycles: u64,
-    /// Pause between two scans, in milliseconds.
-    #[arg(long, default_value_t = 10)]
-    pub period_ms: u64,
+    /// Period between two scans, in milliseconds.
+    ///
+    /// Defaults to the project's `ScanConfig::period_ms`.
+    #[arg(long)]
+    pub period_ms: Option<u64>,
+    /// Pace the run with the wall clock instead of deterministic simulated time.
+    #[arg(long)]
+    pub real_time: bool,
     /// Print a machine readable JSON summary instead of per-cycle lines.
     #[arg(long)]
     pub json: bool,
@@ -152,13 +159,22 @@ where
 }
 
 /// JSON summary printed by `run --json`.
-#[derive(Debug, Serialize)]
-struct RunSummary<'a> {
+///
+/// Every field is a deterministic function of the project, the number of cycles
+/// and the period: a simulated run never reports a wall-clock measurement, so
+/// serializing the summary twice for the same command yields byte-identical
+/// JSON.
+#[derive(Debug, Serialize, PartialEq)]
+struct RunSummary {
     /// Project that was executed.
     project: String,
+    /// `true` when the run used deterministic simulated time.
+    simulated: bool,
     /// Number of scans performed.
     cycles: u64,
-    /// Longest scan duration in milliseconds.
+    /// Period between two scans, in milliseconds.
+    period_ms: u64,
+    /// Longest scan duration in milliseconds; `0.0` for a simulated run.
     max_scan_ms: f64,
     /// Ticks that arrived later than the configured scan period.
     missed: u64,
@@ -166,58 +182,19 @@ struct RunSummary<'a> {
     /// simulation driver.
     active_outputs: Vec<usize>,
     /// Diagnostics collected over the whole run.
-    diagnostics: &'a [Diagnostic],
+    diagnostics: Vec<Diagnostic>,
 }
 
 fn run_project(args: &RunArgs) -> i32 {
-    let mut runtime = match Runtime::from_file(&args.project) {
-        Ok(runtime) => runtime,
+    let summary = match execute_run(args) {
+        Ok(summary) => summary,
         Err(error) => {
-            eprintln!("error: cannot load `{}`: {error}", args.project.display());
+            eprintln!("error: {error}");
             return EXIT_USAGE;
         }
     };
 
-    runtime.start_at(0);
-    let started = Instant::now();
-    let mut diagnostics: Vec<Diagnostic> = Vec::new();
-
-    for _ in 0..args.cycles {
-        // The simulated clock follows the real elapsed time of the run.
-        let now_ms = started.elapsed().as_millis() as u64;
-        let Some(report) = runtime.tick(now_ms) else {
-            break;
-        };
-        if !args.json {
-            println!(
-                "cycle {:>6}  now={:>6}ms  state={:?}  diagnostics={}",
-                report.cycles,
-                now_ms,
-                runtime.state,
-                report.diagnostics.len()
-            );
-            for diagnostic in &report.diagnostics {
-                println!("    {diagnostic}");
-            }
-        }
-        diagnostics.extend(report.diagnostics);
-        if args.period_ms > 0 {
-            std::thread::sleep(Duration::from_millis(args.period_ms));
-        }
-    }
-
-    let active_outputs = mirror_outputs(&runtime.engine);
-    let stats = *runtime.stats();
-
     if args.json {
-        let summary = RunSummary {
-            project: args.project.display().to_string(),
-            cycles: stats.cycles,
-            max_scan_ms: stats.max_ms,
-            missed: stats.missed,
-            active_outputs,
-            diagnostics: &diagnostics,
-        };
         match serde_json::to_string_pretty(&summary) {
             Ok(text) => println!("{text}"),
             Err(error) => {
@@ -226,25 +203,79 @@ fn run_project(args: &RunArgs) -> i32 {
             }
         }
     } else {
-        println!(
-            "summary: cycles={} max_scan_ms={:.3} missed={} diagnostics={}",
-            stats.cycles,
-            stats.max_ms,
-            stats.missed,
-            diagnostics.len()
-        );
-        for diagnostic in &diagnostics {
-            println!("    {diagnostic}");
-        }
+        print_summary(&summary);
     }
 
-    if diagnostics
+    if summary
+        .diagnostics
         .iter()
         .any(|diagnostic| diagnostic.severity == Severity::Error)
     {
         EXIT_DIAGNOSTICS
     } else {
         EXIT_OK
+    }
+}
+
+/// Runs the project of `args` with a deterministic simulated clock (or a
+/// realtime one with `--real-time`) and collects the run summary.
+fn execute_run(args: &RunArgs) -> Result<RunSummary, String> {
+    let mut runtime = Runtime::from_file(&args.project)
+        .map_err(|error| format!("cannot load `{}`: {error}", args.project.display()))?;
+
+    let period_ms = args
+        .period_ms
+        .unwrap_or(u64::from(runtime.project.scan.period_ms));
+    let mut clock = if args.real_time {
+        Clock::realtime(period_ms)
+    } else {
+        Clock::simulated(period_ms)
+    };
+
+    let batch = runtime.run_cycles(&mut clock, args.cycles);
+
+    Ok(RunSummary {
+        project: args.project.display().to_string(),
+        simulated: batch.simulated,
+        cycles: batch.cycles,
+        period_ms: batch.period_ms,
+        max_scan_ms: batch.max_scan_ms,
+        missed: batch.missed,
+        active_outputs: mirror_outputs(&runtime.engine),
+        diagnostics: batch.diagnostics,
+    })
+}
+
+/// Prints the human readable summary.
+///
+/// Simulated runs never print a wall-clock measurement, so the output of two
+/// identical commands is identical as well.
+fn print_summary(summary: &RunSummary) {
+    let mode = if summary.simulated {
+        "simulated"
+    } else {
+        "realtime"
+    };
+    println!(
+        "summary: mode={mode} cycles={} period_ms={} missed={} diagnostics={}",
+        summary.cycles,
+        summary.period_ms,
+        summary.missed,
+        summary.diagnostics.len()
+    );
+    if !summary.simulated {
+        println!("         max_scan_ms={:.3}", summary.max_scan_ms);
+    }
+    if !summary.active_outputs.is_empty() {
+        let channels: Vec<String> = summary
+            .active_outputs
+            .iter()
+            .map(usize::to_string)
+            .collect();
+        println!("         active_outputs={}", channels.join(","));
+    }
+    for diagnostic in &summary.diagnostics {
+        println!("    {diagnostic}");
     }
 }
 
@@ -285,8 +316,17 @@ fn lint_project(args: &LintArgs) -> i32 {
     };
 
     let mut diagnostics = structural_diagnostics(&project);
+    // Element-level checks live in the core so that the editor, the CLI and the
+    // monitor all report the same codes and messages.
+    diagnostics.extend(softladder_core::lint(&project));
     let mut engine = ScanEngine::new(project);
     diagnostics.extend(engine.scan_once(0).diagnostics);
+    diagnostics.dedup_by(|right, left| {
+        right.code == left.code
+            && right.message == left.message
+            && right.section == left.section
+            && right.rung == left.rung
+    });
     diagnostics.sort_by_key(|diagnostic| std::cmp::Reverse(diagnostic.severity));
 
     for diagnostic in &diagnostics {
@@ -358,25 +398,6 @@ fn structural_diagnostics(project: &Project) -> Vec<Diagnostic> {
                 )
                 .with_rung(index),
             );
-        }
-        for element in &rung.elements {
-            let needs_variable = !matches!(
-                element.kind,
-                ElementKind::Compare | ElementKind::Operate | ElementKind::Connection
-            );
-            if needs_variable && element.var.is_none() {
-                diagnostics.push(
-                    Diagnostic::new(
-                        Severity::Error,
-                        "SL-E004",
-                        format!(
-                            "rung {} has a {:?} element without a variable",
-                            rung.id, element.kind
-                        ),
-                    )
-                    .with_rung(index),
-                );
-            }
         }
     }
 
@@ -464,6 +485,7 @@ mod tests {
             "5",
             "--period-ms",
             "2",
+            "--real-time",
             "--json",
         ])
         .expect("arguments parse");
@@ -471,7 +493,8 @@ mod tests {
             Command::Run(args) => {
                 assert_eq!(args.project, PathBuf::from("project.slprj"));
                 assert_eq!(args.cycles, 5);
-                assert_eq!(args.period_ms, 2);
+                assert_eq!(args.period_ms, Some(2));
+                assert!(args.real_time);
                 assert!(args.json);
             }
             other => panic!("expected the run subcommand, got {other:?}"),
@@ -484,7 +507,9 @@ mod tests {
         match cli.command {
             Command::Run(args) => {
                 assert_eq!(args.cycles, 100);
-                assert_eq!(args.period_ms, 10);
+                // No `--period-ms`: the project's `ScanConfig` decides.
+                assert_eq!(args.period_ms, None);
+                assert!(!args.real_time);
                 assert!(!args.json);
             }
             other => panic!("expected the run subcommand, got {other:?}"),
@@ -553,22 +578,33 @@ mod tests {
     }
 
     #[test]
-    fn structural_checks_find_duplicates_and_missing_variables() {
+    fn project_level_checks_find_duplicate_ids_and_empty_rungs() {
         let mut project = Project::new("lint");
         project.rungs.push(softladder_core::Rung::new(1));
         project.rungs.push(softladder_core::Rung::new(1));
-        let mut rung = softladder_core::Rung::new(2);
+        project.rungs.push(softladder_core::Rung::new(2));
+
+        let diagnostics = structural_diagnostics(&project);
+        assert!(diagnostics.iter().any(|d| d.code == "SL-E010"));
+        assert!(diagnostics.iter().any(|d| d.code == "SL-W011"));
+    }
+
+    #[test]
+    fn element_level_checks_come_from_the_core_linter() {
+        let mut project = Project::new("lint");
+        let mut rung = softladder_core::Rung::new(1);
         rung.elements.push(softladder_core::PlacedElement::new(
             ElementKind::CoilOut,
             0,
             0,
         ));
         project.rungs.push(rung);
+        let mut section = softladder_core::Section::new(1, "Main");
+        section.rungs.push(1);
+        project.sections.push(section);
 
-        let diagnostics = structural_diagnostics(&project);
-        assert!(diagnostics.iter().any(|d| d.code == "SL-E010"));
+        let diagnostics = softladder_core::lint(&project);
         assert!(diagnostics.iter().any(|d| d.code == "SL-E004"));
-        assert!(diagnostics.iter().any(|d| d.code == "SL-W011"));
     }
 
     #[test]
@@ -576,10 +612,97 @@ mod tests {
         let args = RunArgs {
             project: example_project(),
             cycles: 3,
-            period_ms: 0,
+            period_ms: Some(0),
+            real_time: false,
             json: true,
         };
         assert_eq!(run_project(&args), EXIT_OK);
+    }
+
+    #[test]
+    fn a_run_defaults_to_simulated_time() {
+        let args = RunArgs {
+            project: example_project(),
+            cycles: 20,
+            period_ms: None,
+            real_time: false,
+            json: false,
+        };
+        let summary = execute_run(&args).expect("the example project runs");
+        assert!(summary.simulated);
+        assert_eq!(summary.cycles, 20);
+        assert_eq!(summary.missed, 0);
+        // Without `--period-ms` the project's `ScanConfig` decides.
+        assert_eq!(summary.period_ms, 10);
+        assert_eq!(summary.max_scan_ms, 0.0);
+    }
+
+    #[test]
+    fn a_simulated_run_does_not_sleep() {
+        // 1000 cycles at one second each would take over 16 minutes if the run
+        // were paced with the wall clock; simulated time must return at once.
+        let args = RunArgs {
+            project: example_project(),
+            cycles: 1000,
+            period_ms: Some(1000),
+            real_time: false,
+            json: false,
+        };
+        let started = std::time::Instant::now();
+        let summary = execute_run(&args).expect("the example project runs");
+        assert!(started.elapsed() < std::time::Duration::from_millis(500));
+        assert_eq!(summary.cycles, 1000);
+        assert_eq!(summary.period_ms, 1000);
+        assert_eq!(summary.missed, 0);
+    }
+
+    #[test]
+    fn the_json_summary_is_byte_identical_between_runs() {
+        let args = RunArgs {
+            project: example_project(),
+            cycles: 25,
+            period_ms: None,
+            real_time: false,
+            json: true,
+        };
+        let first = execute_run(&args).expect("first run");
+        let second = execute_run(&args).expect("second run");
+        assert_eq!(first, second);
+
+        let first_json = serde_json::to_string(&first).expect("the summary serializes");
+        let second_json = serde_json::to_string(&second).expect("the summary serializes");
+        assert_eq!(first_json, second_json);
+
+        // The documented schema is present and stable.
+        let value: serde_json::Value =
+            serde_json::from_str(&first_json).expect("the summary is valid JSON");
+        for key in [
+            "project",
+            "simulated",
+            "cycles",
+            "period_ms",
+            "max_scan_ms",
+            "missed",
+            "active_outputs",
+            "diagnostics",
+        ] {
+            assert!(value.get(key).is_some(), "the JSON summary has no `{key}`");
+        }
+        assert_eq!(value["simulated"], serde_json::Value::Bool(true));
+        assert_eq!(value["cycles"], serde_json::json!(25));
+        assert_eq!(value["missed"], serde_json::json!(0));
+    }
+
+    #[test]
+    fn running_a_missing_project_reports_usage() {
+        let args = RunArgs {
+            project: PathBuf::from("/definitely/not/here.slprj"),
+            cycles: 1,
+            period_ms: None,
+            real_time: false,
+            json: true,
+        };
+        assert_eq!(run_project(&args), EXIT_USAGE);
     }
 
     #[test]

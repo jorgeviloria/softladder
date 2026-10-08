@@ -31,6 +31,16 @@ pub enum ProjectError {
     /// The file is not a valid SoftLadder/ClassicLadder container.
     #[error("container error: {0}")]
     Container(String),
+    /// The document's `schema_version` is newer than this build understands, so
+    /// its fields cannot be interpreted safely.
+    #[error(
+        "unsupported schema version {0}: the document is newer than the current schema version"
+    )]
+    UnsupportedSchema(u32),
+    /// The document is not shaped like a project document at all (for example,
+    /// the JSON root is not an object).
+    #[error("malformed project document: {0}")]
+    MalformedDocument(String),
     /// The requested feature is scheduled for a later milestone.
     #[error("not yet implemented (planned for {0})")]
     NotYetImplemented(&'static str),

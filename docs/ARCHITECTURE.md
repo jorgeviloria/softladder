@@ -68,17 +68,17 @@ reproducible in tests and replayable from a recording.
 | `%MW` | Internal memory word | `Word`/`DWord` | `%W` |
 | `%I` / `%Q` | Physical digital input / output | `Bit` | `%I` / `%Q` |
 | `%IW` / `%QW` | Physical analog input / output | `Word`/`Real` | `%IW` / `%QW` |
-| `%TM` | IEC timer instance — `%TM3` is the done bit, `%TM3.V` its current value | `Bit`/`Word` | `%TM` |
-| `%C` | Counter instance — `%C1` is the done bit, `%C1.V` its current value | `Bit`/`Word` | `%C` |
-| `%R` | FIFO/LIFO register | `Word` | `%R` |
-| `%X` | SFC step activity / step timer | `Bit`/`Word` | `%X` |
+| `%TM` | IEC timer instance: `%TM3.Q` output, `.V` elapsed, `.P` preset | `Bit`/`Word` | `%TM` |
+| `%C` | Counter instance: `%C1.D` done, `.V` value, `.P` preset, `.E`/`.F` wrap flags | `Bit`/`Word` | `%C` |
+| `%R` | FIFO/LIFO register: `.E` empty, `.F` full, `.I` in, `.O` out, `.S` count | `Bit`/`Word` | `%R` |
+| `%X` | SFC step: `.A` activity, `.V` elapsed | `Bit`/`Word` | `%X` |
 | `%S` | System variables (clock, PLC state, scan time) | both | `%S` |
 | `%QLED` | User LED (physical and on-screen) | `Bit` | `%QLED` |
 
-Indexing and bit access are first-class: `%MW[%MW0]` (index by variable) and `%MW20.3`
-(bit extraction / insertion in a word) — two items from the original ClassicLadder TODO list.
-`Display` always renders the canonical modern mnemonic, so parsing `%B0` and printing it yields
-`%M0`.
+Indexing, accessors and bit selection are first-class: `%MW[%MW0]` (index by variable),
+`%MW20.3` (bit extraction / insertion inside a word) and the ClassicLadder sub-value spellings above
+— the last two are items from the original ClassicLadder TODO list. `Display` always renders the
+canonical form, so parsing `%B0` yields `%M0` and parsing `%TM0` yields `%TM0.Q`.
 
 ## 5. Expression engine
 

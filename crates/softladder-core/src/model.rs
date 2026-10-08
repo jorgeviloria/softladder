@@ -138,6 +138,11 @@ pub struct PlacedElement {
     pub col: u8,
     /// Zero-based row, increasing downwards. Rows are parallel branches.
     pub row: u8,
+    /// `true` when this cell is wired to the cell directly above it in the same
+    /// column. Vertical links build parallel branches and their merge points;
+    /// see `docs/SEMANTICS.md` §2.
+    #[serde(default)]
+    pub connected_with_top: bool,
     /// Free-form parameters: timer/counter preset, operate target and
     /// expression, comparison operands and operator, and so on.
     pub params: Vec<String>,
@@ -151,6 +156,7 @@ impl PlacedElement {
             var: None,
             col,
             row,
+            connected_with_top: false,
             params: Vec::new(),
         }
     }
@@ -158,23 +164,23 @@ impl PlacedElement {
     /// Creates an element bound to `var`.
     pub fn with_var(kind: ElementKind, var: VarRef, col: u8, row: u8) -> Self {
         Self {
-            kind,
             var: Some(var),
-            col,
-            row,
-            params: Vec::new(),
+            ..Self::new(kind, col, row)
         }
     }
 
     /// Creates an element carrying `params`.
     pub fn with_params(kind: ElementKind, col: u8, row: u8, params: &[&str]) -> Self {
         Self {
-            kind,
-            var: None,
-            col,
-            row,
             params: params.iter().map(|p| (*p).to_owned()).collect(),
+            ..Self::new(kind, col, row)
         }
+    }
+
+    /// Returns a copy of this element wired to the cell above it.
+    pub fn linked_up(mut self) -> Self {
+        self.connected_with_top = true;
+        self
     }
 }
 
@@ -259,8 +265,12 @@ impl Section {
 /// A named symbol (mnemonic) attached to a variable.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct Symbol {
-    /// Symbolic name.
+    /// Symbolic name, unique inside the project.
     pub name: String,
+    /// Variable the symbol resolves to. Optional, so a symbol may be declared
+    /// before its variable is chosen; the editor resolves it for display.
+    #[serde(default)]
+    pub var: Option<VarRef>,
     /// Human readable description.
     pub comment: String,
     /// Optional engineering unit.
@@ -308,7 +318,11 @@ pub struct Project {
 }
 
 /// Current project schema version.
-pub const SCHEMA_VERSION: u32 = 1;
+///
+/// Version 2 replaced the `bit` field of [`crate::vars::VarRef`] with a general
+/// `accessor`, so that ClassicLadder sub-values such as `%TM0.Q` or `%R0.I` can
+/// be expressed. See `docs/FORMAT.md`.
+pub const SCHEMA_VERSION: u32 = 2;
 
 fn default_schema_version() -> u32 {
     SCHEMA_VERSION
@@ -359,8 +373,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_project_is_schema_version_one() {
-        assert_eq!(Project::default().schema_version, 1);
+    fn default_project_carries_the_current_schema_version() {
+        assert_eq!(Project::default().schema_version, SCHEMA_VERSION);
+        assert_eq!(SCHEMA_VERSION, 2);
         assert_eq!(ScanConfig::default().period_ms, 10);
     }
 

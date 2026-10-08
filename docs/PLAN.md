@@ -266,7 +266,7 @@ Cada hito termina con criterios de aceptación verificables. **M0 ya está ejecu
 | Hito | Contenido | Criterio de aceptación |
 | --- | --- | --- |
 | **M0** ✅ | Repositorio, workspace Cargo, CI, plan y ADRs | `cargo fmt/clippy/test` en verde y CI corriendo en GitHub |
-| **M1** | Núcleo: modelo, variables, expresiones, FBs, scan engine, diagnósticos + deuda declarada en M0 (ver abajo) | Ejecutar un proyecto por CLI y obtener salidas deterministas; tests de TON/TOF/TP/CTU y de expresiones |
+| **M1** ✅ | Núcleo: variables v2 con accesores, power flow por columna, FBs completos (temporizadores, contadores, registros), saltos y subrutinas, `lint` estructural, tiempo simulado determinista, migración v1→v2 | 167 tests en verde; el ejemplo se ejecuta por CLI con salida idéntica entre ejecuciones; `lint` sin diagnósticos |
 | **M2** | Editor MVP en egui: crear/editar/guardar rungs, undo/redo, panel de simulación | Programa "semáforo" editable y ejecutable en simulación; cerrar y reabrir conserva el proyecto |
 | **M3** | Import/export ClassicLadder + corpus dorado | Los 39 proyectos de `projects_examples/` importan sin pánico; round-trip estable; avisos por elemento |
 | **M4** | SFC/Grafcet: modelo, motor y editor | Los ejemplos `example_sequential*.clprj` se ejecutan igual que en la referencia |
@@ -310,35 +310,33 @@ Hitos de calidad transversales: cada hito añade sus tests, sus docs y su entrad
 
 - Workspace Cargo con los 7 crates, compilando y con tests mínimos.
 - CI en GitHub Actions (fmt, clippy, test, build cruzado).
-- Documentación: este plan, `ARCHITECTURE.md`, `COMPAT.md`, `FORMAT.md`, `ELEMENTS.md`,
-  `CONTRIBUTING.md` y ADRs 0001–0006.
+- Documentación: este plan, `SEMANTICS.md` (especificación normativa del motor), `ARCHITECTURE.md`,
+  `COMPAT.md`, `FORMAT.md`, `ELEMENTS.md`, `CONTRIBUTING.md` y ADRs 0001–0006.
 - Ejemplo semilla `examples/traffic_light.slprj` y `examples/README.md`.
 - `softladder-cli` ejecuta un proyecto en modo headless (esqueleto funcional del ciclo de scan).
 
-**Siguiente paso inmediato**: M1 — consolidar el núcleo (tipos de variable, evaluación de
-expresiones, temporizadores/contadores con estado, diagnósticos) y cubrirlo con tests.
+**Siguiente paso inmediato**: M2 — editor MVP en egui (crear/editar/guardar rungs, undo/redo,
+panel de simulación), ya sobre un motor que ejecuta ladder de verdad.
 
-### Deuda declarada que M0 deja abierta (a resolver en M1/M2)
+### Deuda resuelta en M1
 
-Es deuda *consciente y documentada*, no trabajo olvidado; todas las piezas afectadas lo dicen en un
-comentario `TODO(M1)` o en un `NotYetImplemented`:
+- Power flow real por columna con propagación vertical y ramas paralelas.
+- Entradas dedicadas de los function blocks (reset/preset/up/down de contadores; reset/in/out de
+  registros) y registros FIFO/LIFO implementados.
+- `CoilJump` y `CoilCall` ejecutados, con guardas de bucle infinito y de profundidad de pila.
+- Símbolos enlazados a variables (`Symbol::var`).
+- Cadena de migraciones del formato con fixtures `insta` (v1 → v2).
+- Tiempo simulado determinista en `run --cycles`.
 
-- **Power flow real por columna**: el esqueleto evalúa por filas y trata `Connection` de forma
-  aproximada; falta la propagación vertical exacta (y la semántica de bobinas apiladas).
-- **Entradas de los FBs**: los contadores solo cuentan ascendente con flujo de rung; faltan
-  `CU/CD/R/LD` como elementos dedicados. Registros FIFO/LIFO sin implementar.
-- **`CoilJump` y `CoilCall`**: declarados en el modelo, aún no ejecutados (saltos y subrutinas).
-- **Símbolos sin variable asociada**: `Symbol { name, comment, unit }` todavía no se puede resolver
-  a un `VarRef`; añadir un campo `var` opcional (compatible hacia atrás, sin subir `schema_version`).
-- **Cadena de migraciones del formato**: `MIGRATIONS` + fixtures `insta` descritos en `FORMAT.md`
-  pero no implementados (solo hay `schema_version = 1`).
+### Deuda declarada que sigue abierta
+
 - **Stubs por hito**: import/export ClassicLadder (M3), motor SFC (M4, hoy emite `SL-W002`),
   drivers Modbus/GPIO/HAL (M5/M7), servidor del monitor (M6) y Abrir/Guardar en la UI (M2).
-- **Tiempo en `run --cycles`**: el CLI avanza con reloj real (`Instant` + `sleep`), así que el
-  contador de *missed* refleja el sobrepaso real del `sleep` (en una demo con `--period-ms 100`
-  aparece `missed=2`). Para M1 el modo por lotes debe usar **tiempo simulado** determinista y dejar
-  el reloj real solo para la ejecución libre; es requisito previo de `.sltest` y del replay.
+- **Símbolos en la UI**: el modelo ya los enlaza a variables (`Symbol::var`), pero el editor todavía
+  no los usa para mostrar nombres en el canvas (M2).
+- **Sistema de palabras de sistema (`%SW`)**: `%S` existe como bit; falta la familia de palabras de
+  sistema (M2, lo reportará el importador de M3 como aviso).
 
-Verificado en M0: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`
-y `cargo test --workspace` en verde (80 tests), y `cargo build --workspace` completo con
-`eframe` 0.31.
+Verificado en M1: `cargo fmt --all --check` y `cargo clippy --workspace --all-targets -- -D warnings`
+en verde, `cargo test --workspace` con 167 tests, `run` reproducible (mismo proyecto ⇒ mismo JSON) y
+CI en verde en Linux, macOS y Windows.
