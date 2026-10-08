@@ -7,9 +7,10 @@
 
 use std::path::Path;
 
+use softladder_core::model::WireMode;
 use softladder_core::{
-    Accessor, Diagnostic, ElementKind, PlacedElement, Project, Rung, Severity, Symbol, Value,
-    VarRef, VarStore,
+    eval, parse, Accessor, Diagnostic, ElementKind, PlacedElement, Project, Rung, Severity, Symbol,
+    Value, VarRef, VarStore,
 };
 use softladder_edit::RuntimeState;
 
@@ -318,6 +319,233 @@ pub fn cell_power(power: &[(u8, u8, bool)], col: u8, row: u8) -> bool {
         .iter()
         .find(|(cell_col, cell_row, _)| *cell_col == col && *cell_row == row)
         .map(|(_, _, live)| *live)
+        .unwrap_or(false)
+}
+
+/// Power state of one cell of a rung.
+///
+/// `fed` is the power arriving at the cell's left side (the rail, or the OR over
+/// the cell's vertical block) and `live` is the power leaving it to the right,
+/// which is what the canvas colours the wire and the glyph with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CellPower {
+    /// Column of the cell.
+    pub col: u8,
+    /// Row of the cell.
+    pub row: u8,
+    /// Power arriving at the cell's left side.
+    pub fed: bool,
+    /// Power leaving the cell to the right.
+    pub live: bool,
+}
+
+/// The rows a rung uses, counting every row a function block occupies.
+///
+/// [`Rung::row_count`] only looks at the rows elements are *placed* on; a
+/// counter placed on row 0 reads four rows, so the canvas needs the taller
+/// number to draw the block and its input rows.
+pub fn rung_rows(rung: &Rung) -> u8 {
+    let rows = rung
+        .elements
+        .iter()
+        .map(|element| usize::from(element.row) + usize::from(block_span(element.kind)))
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    u8::try_from(rows).unwrap_or(u8::MAX)
+}
+
+/// The columns a rung uses (the largest column plus one, at least one).
+pub fn rung_cols(rung: &Rung) -> u8 {
+    rung.elements
+        .iter()
+        .map(|element| usize::from(element.col) + 1)
+        .max()
+        .unwrap_or(1)
+        .max(1)
+        .try_into()
+        .unwrap_or(u8::MAX)
+}
+
+/// Number of grid rows a function block reads, one for a single-cell element.
+///
+/// Mirrors the scan engine: a counter reads `CU/CD/R/LD` from four rows, a
+/// register `R/IN/OUT` from three, and a timer from its own row.
+pub fn block_span(kind: ElementKind) -> u8 {
+    match kind {
+        ElementKind::Counter { .. } => 4,
+        ElementKind::Register { .. } => 3,
+        _ => 1,
+    }
+}
+
+/// The element whose cell covers `(col, row)`, counting the rows a block reads.
+///
+/// A counter is placed once and occupies four rows; clicking any of them has to
+/// find that one element, which is what makes a block draggable as a unit.
+pub fn element_at_cell(rung: &Rung, col: u8, row: u8) -> Option<&PlacedElement> {
+    let (col, row) = (usize::from(col), usize::from(row));
+    rung.elements.iter().find(|element| {
+        usize::from(element.col) == col
+            && row >= usize::from(element.row)
+            && row < usize::from(element.row) + usize::from(block_span(element.kind))
+    })
+}
+
+/// Power flow for every cell of `rung`, as the scan engine computes it.
+///
+/// This is [`power_grid`] extended with the two things the live diagram needs:
+/// the vertical links (`connected_with_top`, `docs/SEMANTICS.md` §2) so parallel
+/// branches and their merge points read the way they run, and the power arriving
+/// at a cell (`fed`) so a wire stays lit when the element that follows it is
+/// open. Cells are reported in column-major order, one entry per cell of
+/// `rung_rows` × `rung_cols`.
+pub fn power_map(rung: &Rung, store: &VarStore) -> Vec<CellPower> {
+    let rows = usize::from(rung_rows(rung));
+    let cols = usize::from(rung_cols(rung));
+    let mut power = Vec::with_capacity(rows.saturating_mul(cols));
+    if rung.elements.is_empty() || rows == 0 || cols == 0 {
+        return power;
+    }
+    let explicit = rung.wire_mode == WireMode::Explicit;
+    let mut previous = vec![false; rows];
+    let mut current = vec![false; rows];
+    let mut fed = vec![false; rows];
+    for col in 0..cols {
+        std::mem::swap(&mut previous, &mut current);
+        for (row, slot) in fed.iter_mut().enumerate() {
+            *slot = state_on_left(rung, col, row, &previous, rows);
+        }
+        // What an empty cell carries: nothing in an inert row, nothing across an
+        // explicit gap, and the power from the left in an implicit live row.
+        for (row, slot) in current.iter_mut().enumerate() {
+            let exists = element_at_cell(rung, cell_col(col), cell_row(row)).is_some();
+            *slot = if !covers(rung, row) || (explicit && !exists) {
+                false
+            } else {
+                fed.get(row).copied().unwrap_or(false)
+            };
+        }
+        // Then the cells that hold an element overwrite their own output.
+        for element in &rung.elements {
+            if usize::from(element.col) != col {
+                continue;
+            }
+            let row = usize::from(element.row);
+            let span = usize::from(block_span(element.kind));
+            if span > 1 {
+                // A block writes its own output on its first row; the rest of
+                // its rows are inputs, so they conduct what reaches them.
+                if let Some(slot) = current.get_mut(row) {
+                    *slot = element_energised(element, store);
+                }
+                for offset in 1..span {
+                    if let Some(slot) = row.checked_add(offset).and_then(|at| current.get_mut(at)) {
+                        *slot = fed.get(row + offset).copied().unwrap_or(false);
+                    }
+                }
+            } else if let Some(slot) = current.get_mut(row) {
+                *slot = fed.get(row).copied().unwrap_or(false) && conducts(element, store);
+            }
+        }
+        for row in 0..rows {
+            power.push(CellPower {
+                col: cell_col(col),
+                row: cell_row(row),
+                fed: fed.get(row).copied().unwrap_or(false),
+                live: current.get(row).copied().unwrap_or(false),
+            });
+        }
+    }
+    power
+}
+
+/// A column index as the `u8` the model stores, saturating.
+fn cell_col(col: usize) -> u8 {
+    u8::try_from(col).unwrap_or(u8::MAX)
+}
+
+/// A row index as the `u8` the model stores, saturating.
+fn cell_row(row: usize) -> u8 {
+    u8::try_from(row).unwrap_or(u8::MAX)
+}
+
+/// The power state of a cell in a [`power_map`] result, or a dead cell.
+pub fn cell_state(power: &[CellPower], col: u8, row: u8) -> CellPower {
+    power
+        .iter()
+        .find(|cell| cell.col == col && cell.row == row)
+        .copied()
+        .unwrap_or(CellPower {
+            col,
+            row,
+            fed: false,
+            live: false,
+        })
+}
+
+/// `true` when `row` holds (part of) an element, i.e. when the row is live.
+fn covers(rung: &Rung, row: usize) -> bool {
+    rung.elements.iter().any(|element| {
+        let start = usize::from(element.row);
+        row >= start && row < start + usize::from(block_span(element.kind))
+    })
+}
+
+/// `true` when the cell at `(col, row)` declares a link with the one above it.
+fn linked_up(rung: &Rung, col: usize, row: usize) -> bool {
+    row > 0
+        && rung.elements.iter().any(|element| {
+            usize::from(element.col) == col
+                && usize::from(element.row) == row
+                && element.connected_with_top
+        })
+}
+
+/// `state_on_left` of the scan engine: the rail for column zero, and the OR of
+/// the previous column over the cell's vertical block everywhere else.
+fn state_on_left(rung: &Rung, col: usize, row: usize, previous: &[bool], rows: usize) -> bool {
+    if col == 0 {
+        // An empty cell in column zero touches nothing.
+        return element_at_cell(rung, 0, cell_row(row)).is_some();
+    }
+    let mut result = previous.get(row).copied().unwrap_or(false);
+    let mut y = row;
+    while y > 0 && linked_up(rung, col, y) {
+        y -= 1;
+        result |= previous.get(y).copied().unwrap_or(false);
+    }
+    let mut y = row.saturating_add(1);
+    while y < rows && linked_up(rung, col, y) {
+        result |= previous.get(y).copied().unwrap_or(false);
+        y += 1;
+    }
+    result
+}
+
+/// `true` when the element passes power from its left side to its right side.
+fn conducts(element: &PlacedElement, store: &VarStore) -> bool {
+    if element.kind == ElementKind::Compare {
+        return compare_holds(element, store);
+    }
+    element_conducts(element, store)
+}
+
+/// Evaluates a compare block's expression the way the engine does.
+fn compare_holds(element: &PlacedElement, store: &VarStore) -> bool {
+    let expression = match element.params.len() {
+        1 => element.params.first().cloned().unwrap_or_default(),
+        3 => element
+            .params
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(" "),
+        _ => return false,
+    };
+    parse(&expression)
+        .and_then(|expr| eval(&expr, store))
+        .map(Value::as_bool)
         .unwrap_or(false)
 }
 

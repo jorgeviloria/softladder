@@ -7,31 +7,41 @@ is covered by headless tests.
 
 ## Layout
 
+The window follows the convention every industrial programming tool shares: a ribbon of labelled
+command groups, a project tree on the left, **documents** in the middle, an inspector on the right
+and a status bar of badges. [`UX.md`](UX.md) §3 has the full specification and §4 the design tokens.
+
 ```
-┌───────────────────────────────────────────────────────────────────────────────┐
-│ File   Edit   View   Run   Help                                    (menu bar) │
-├──────────────┬────────────────────────────────────────────┬───────────────────┤
-│ Sections     │  Element palette                           │  Bench            │
-│  • Main      │  -[ ]- -[/]- -[P]- -[N]- | -() -(/)-       │   [ ] start       │
-│  • SR1       │  -S- -R- -J- -C- | TON CTU FIFO CMP OPE   │   ( ) green       │
-│              ├────────────────────────────────────────────┤   ────────        │
-│ Rungs        │                                            │  Watch            │
-│  1 start_stop│            rung canvas (pan / zoom)        │  Problems         │
-│  2 amber     │                                            │  Symbols          │
-│  3 counter   │                                            │                   │
-├──────────────┴────────────────────────────────────────────┴───────────────────┤
-│ Run  cycles 412   scan 0.03 ms   /path/project.slprj *   3 problems           │
-└───────────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│ SoftLadder   File  Edit  Insert  Online  View  Tools  Help                       │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│ ↶ ↷ │ New Open Save │ Run Step Fill │ − + 1:1 Addresses Dark │ NO NC TON CTU …  │
+├──────────────────┬───────────────────────────────────────────┬───────────────────┤
+│ PROJECT          │ ‹Ladder› ‹PLC tags› ‹Bench› ‹Watch & force› ‹Problems›        │
+│  traffic_light   ├───────────────────────────────────────────┤ INSPECTOR         │
+│   Program        │  Network 1   start_stop             ok    │  Element          │
+│    Main LAD      │  Start/stop with self-hold…               │  Contact NO       │
+│     1 start_stop │   start_button      stop_button           │  Tag  %I0         │
+│     2 amber_3s   │    %I0               %I2                  │  Params           │
+│   PLC tags       │    -[ ]------+------[/]------( )-         │                   │
+│   Simulation     │              │                            │                   │
+│   Watch & force  │   green_lamp │                            │                   │
+│   Problems       │    %Q0       │                            │                   │
+├──────────────────┴───────────────────────────────────────────┴───────────────────┤
+│ ● Simulation │ RUN │ cycles 412 │ scan 0.31 ms │ line.slprj * │ 1 error 2 warn │ 100% │
+└──────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Left** — sections, then the rungs of the selected section. A rung row shows its label and
-  comment, and a marker when the rung has an error.
-- **Centre** — the rung canvas. Grid, power rail on the left, one cell per element, chosen rung
-  highlighted. Pan with the middle button or space-drag, zoom with the wheel or `Ctrl +`/`Ctrl -`.
-- **Right** — tabbed: **Bench** (the simulation panel), **Watch** (live variable values),
-  **Problems** (diagnostics), **Symbols**.
-- **Bottom** — run state, cycle count, last scan duration, project path with a `*` when dirty, and
-  the error/warning count.
+* **Left** — the project tree: the PLC, the program, one node per section, its rungs (`1 start_stop`
+  with a one-line comment and an error dot), then the PLC tags, the bench, the watch table and the
+  problems. Clicking a rung selects it and opens the ladder; clicking a node opens that document.
+* **Centre** — the open document. **Ladder** draws the selected section as numbered networks;
+  **PLC tags** is the tag table; **Bench** is the simulation panel laid out as an operator screen;
+  **Watch & force** monitors and forces variables; **Problems** lists the diagnostics.
+* **Right** — the inspector: whatever is selected (an element, a rung, a section, a bench widget),
+  with the tag field, its validation, the parameters, the vertical link and the related commands.
+* **Bottom** — the status bar: simulation badge, run state, cycles, scan time, the project path with
+  `*` when dirty, clickable problem counts and the zoom.
 
 ## Placing and editing
 
@@ -65,6 +75,7 @@ the project before inventing new ones.
 | `Ctrl/Cmd + =` / `Ctrl/Cmd + -` | Zoom in / out |
 | `Ctrl/Cmd + 0` | Reset the view |
 | `F1` | Shortcut help |
+| `V` | Toggle the selected cell's vertical link |
 
 ## Bench
 

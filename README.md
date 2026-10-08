@@ -26,8 +26,11 @@ GTK windows.
 SoftLadder keeps what makes it valuable — the ladder/SFC semantics and the project format — and
 rebuilds everything around it:
 
-- **Editor** — canvas with pan/zoom, element palette, inline variable editing with validation,
-  command-based unlimited undo/redo, and (from M3/M8) cross-references and rename-in-project.
+- **Editor** — a ladder document on paper, the way industrial tools draw one: numbered network
+  headers with title, comment and state badge; tag names over addresses; real IEC symbols including
+  timer and counter boxes with named pins; live power flow in green with inline values; a grouped
+  instruction palette; a project tree; a context-sensitive inspector; and unlimited command-based
+  undo/redo. See [`docs/UX.md`](docs/UX.md).
 - **Simulation bench** — a panel of switches, push-buttons, lamps, sliders and gauges that is part of
   the project, so you can commission the logic before touching hardware. The program's `%I`/`%Q`
   variables are wired to the bench automatically.
@@ -77,6 +80,23 @@ rebuilds everything around it:
 
 See [`docs/PLAN.md`](docs/PLAN.md) (Spanish) for the full plan, milestones and acceptance criteria.
 
+## How the interface is built
+
+The editor is designed against the tools people actually program PLCs with — TIA Portal, Studio 5000,
+CODESYS, TwinCAT, GX Works, Sysmac Studio, Control Expert — and [`docs/UX.md`](docs/UX.md) records
+what that means concretely: the shell (ribbon, project tree, document tabs, inspector, status bar),
+the design tokens (light "paper" theme, spacing scale, type scale, icon set), the ladder conventions
+(networks, symbolic tags, live state) and the panels.
+
+There is no display server in CI, so the interface is reviewed through **headless screenshots**:
+`crates/softladder-ui/tests/ui_shots.rs` runs the real `EditorApp::draw` on an `egui::Context` and
+rasterises the tessellated frame and the font atlas into PNGs under `target/ui-shots/` — no GPU and
+no window, and nothing added to the shipped binary.
+
+```bash
+cargo test -p softladder-ui --test ui_shots    # writes target/ui-shots/*.png
+```
+
 ## Quick start
 
 ```bash
@@ -123,7 +143,8 @@ testdata/                    golden corpus (fetched, not vendored)
 | --- | --- |
 | [`docs/PLAN.md`](docs/PLAN.md) | Vision, ClassicLadder inventory, differentiators, roadmap, risks (Spanish) |
 | [`docs/SEMANTICS.md`](docs/SEMANTICS.md) | Normative specification of ladder execution: power flow, every element, jumps/calls, diagnostics |
-| [`docs/EDITOR.md`](docs/EDITOR.md) | Editor UX contract: layout, keyboard shortcuts, simulation bench, live indication |
+| [`docs/UX.md`](docs/UX.md) | Interface design: vendor conventions, shell, design tokens, ladder editor, panels, accessibility |
+| [`docs/EDITOR.md`](docs/EDITOR.md) | Editor behaviour contract: shortcuts, placement, simulation bench, live indication |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Crate boundaries, data flow, invariants, engineering conventions |
 | [`docs/FORMAT.md`](docs/FORMAT.md) | Native `.slprj` schema and migration rules |
 | [`docs/COMPAT.md`](docs/COMPAT.md) | ClassicLadder container/parts format, variable and element mapping |

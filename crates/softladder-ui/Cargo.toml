@@ -25,3 +25,5 @@ rfd = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# The UI is reviewed through headless screenshots; see tests/ui_shots.rs.
+image = { workspace = true }

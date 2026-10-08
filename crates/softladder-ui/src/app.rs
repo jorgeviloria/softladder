@@ -16,7 +16,7 @@ use softladder_core::{
 };
 use softladder_edit::{Bench, Editor, RuntimeState};
 
-use crate::canvas;
+use crate::design::{Theme, Tokens, SPACE_1};
 use crate::fileops;
 use crate::layout::{self, Camera};
 use crate::palette;
@@ -130,7 +130,70 @@ pub(crate) struct Drag {
 }
 
 /// The SoftLadder editor, minus the window.
+/// Which document the centre of the window shows.
+///
+/// The vendors all put documents — the program, the tag table, live values — in
+/// the middle, side by side. See `docs/UX.md` §3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CentreTab {
+    /// The ladder program.
+    #[default]
+    Ladder,
+    /// The PLC tag table (the symbol table, promoted to a document).
+    Tags,
+    /// The simulation bench, laid out like an operator screen.
+    Bench,
+    /// The watch and force table.
+    Watch,
+    /// Diagnostics for the whole project.
+    Problems,
+}
+
+impl CentreTab {
+    /// Every tab, in the order they appear.
+    pub const ALL: [CentreTab; 5] = [
+        CentreTab::Ladder,
+        CentreTab::Tags,
+        CentreTab::Bench,
+        CentreTab::Watch,
+        CentreTab::Problems,
+    ];
+
+    /// The tab label.
+    pub fn label(self) -> &'static str {
+        match self {
+            CentreTab::Ladder => "Ladder",
+            CentreTab::Tags => "PLC tags",
+            CentreTab::Bench => "Bench",
+            CentreTab::Watch => "Watch & force",
+            CentreTab::Problems => "Problems",
+        }
+    }
+}
+
+/// The whole editor: the documents, the bench and the view state.
+///
+/// It owns no program logic — every mutation goes through [`Editor`] — and no
+/// rendering: `draw` composes the shell and hands each pane to `panels::*`.
 pub struct EditorApp {
+    /// The resolved design tokens of the active theme.
+    pub(crate) tokens: Tokens,
+    /// Which centre document is open.
+    pub(crate) centre_tab: CentreTab,
+    /// The theme the user chose.
+    pub(crate) theme: Theme,
+    /// Whether the canvas shows variable addresses as well as tag names.
+    pub(crate) show_addresses: bool,
+    /// Whether the right-hand inspector is visible.
+    pub(crate) show_inspector: bool,
+    /// Selected row of the PLC tag table.
+    pub(crate) selected_tag: Option<usize>,
+    /// Rows of the watch and force table.
+    pub(crate) watch: Vec<crate::watch::WatchRow>,
+    /// Variables currently forced, with the forced value.
+    pub(crate) forces: Vec<(VarRef, bool)>,
+    /// Buffer of the "add a tag" row.
+    pub(crate) tag_draft: (String, String, String),
     pub(crate) editor: Editor,
     pub(crate) bench: Bench,
     pub(crate) selected_section: usize,
@@ -174,6 +237,15 @@ impl EditorApp {
     pub fn with_editor(editor: Editor) -> Self {
         let bench = Bench::new(editor.project().clone());
         let mut app = Self {
+            tokens: Tokens::light(),
+            centre_tab: CentreTab::default(),
+            theme: Theme::default(),
+            show_addresses: false,
+            show_inspector: true,
+            selected_tag: None,
+            watch: Vec::new(),
+            forces: Vec::new(),
+            tag_draft: (String::new(), String::new(), String::new()),
             editor,
             bench,
             selected_section: 0,
@@ -250,6 +322,66 @@ impl EditorApp {
             .cloned()
     }
 
+    /// Asks to close the application, prompting when there is unsaved work.
+    pub fn request_quit(&mut self) {
+        self.guard(Pending::Quit);
+    }
+
+    /// Writes a variable in the bench's store.
+    ///
+    /// This is how scripts, `.sltest`-style scenarios and the screenshot harness
+    /// set an input without a mouse: it is the same store the bench scans.
+    pub fn set_variable(
+        &mut self,
+        var: &VarRef,
+        value: softladder_core::Value,
+    ) -> Result<(), softladder_core::StoreError> {
+        self.bench.engine_mut().store_mut().set(var, value)
+    }
+
+    /// Reads a variable out of the bench's store.
+    pub fn variable(&self, var: &VarRef) -> Option<softladder_core::Value> {
+        self.bench.engine().store().get(var)
+    }
+
+    /// Recomputes the Problems list from the project.
+    pub fn refresh_diagnostics(&mut self) {
+        self.editor.refresh_diagnostics();
+        self.note("checked the program");
+    }
+
+    /// Opens a centre document: the program, the tags, the bench, the watch
+    /// table or the diagnostics.
+    ///
+    /// The panels own these documents; this is the one entry point they need so
+    /// that the headless screenshot harness can photograph each of them.
+    pub fn show_document(&mut self, tab: CentreTab) {
+        self.centre_tab = tab;
+    }
+
+    /// Chooses the palette, so a caller outside the panels (the screenshot
+    /// harness) can photograph the dark theme as well as the light one.
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+        self.tokens = Tokens::for_theme(theme);
+    }
+
+    /// Selects the right-hand tab.
+    pub fn show_tab(&mut self, tab: RightTab) {
+        self.right_tab = tab;
+        self.show_right_panel = true;
+    }
+
+    /// Selects a rung and, optionally, one of its cells.
+    pub fn select(&mut self, rung: u32, cell: Option<(u8, u8)>) {
+        self.select_rung(rung, cell);
+    }
+
+    /// Whether the bench is running.
+    pub fn is_running(&self) -> bool {
+        self.bench.state() == softladder_edit::RuntimeState::Run
+    }
+
     /// The current frame, and everything the editor does between frames.
     pub fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.draw(ctx);
@@ -266,15 +398,26 @@ impl EditorApp {
     /// the whole interface — every widget and every painter call — without an
     /// `eframe::Frame`; the tests use exactly that.
     pub fn draw(&mut self, ctx: &Context) {
+        // The tokens follow the theme; applying them every frame keeps a toggle
+        // immediate without threading a "dirty style" flag through the panels.
+        let tokens = Tokens::for_theme(self.theme);
+        if tokens != self.tokens {
+            self.tokens = tokens;
+        }
+        self.tokens.apply(ctx);
         self.handle_close_request(ctx);
         self.handle_shortcuts(ctx);
-        self.menu_bar(ctx);
+        egui::TopBottomPanel::top("ribbon").show(ctx, |ui| {
+            ui.add_space(SPACE_1);
+            crate::shell::ribbon(self, ui);
+        });
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| panels::status::show(self, ui));
-        if self.show_right_panel {
-            egui::SidePanel::right("right_panel")
+        if self.show_inspector {
+            egui::SidePanel::right("inspector")
                 .resizable(true)
-                .default_width(300.0)
-                .min_width(220.0)
+                .default_width(268.0)
+                .min_width(200.0)
+                .max_width(420.0)
                 .show(ctx, |ui| panels::right::show(self, ui));
         }
         egui::SidePanel::left("left_panel")
@@ -283,10 +426,7 @@ impl EditorApp {
             .min_width(160.0)
             .show(ctx, |ui| panels::left::show(self, ui));
         egui::CentralPanel::default().show(ctx, |ui| {
-            panels::palette::show(self, ui);
-            panels::properties::show(self, ui);
-            panel_rule(ui);
-            canvas::show(self, ui);
+            crate::shell::centre(self, ui);
         });
         self.confirm_modal(ctx);
         self.windows(ctx);
@@ -391,7 +531,9 @@ impl EditorApp {
     // -- commands -----------------------------------------------------------
 
     /// Performs one [`Action`].
-    pub(crate) fn handle(&mut self, action: Action) {
+    /// Runs one command, exactly as the menu, a toolbar button or a shortcut
+    /// would. This is the entry point automation and the frame tests use.
+    pub fn handle(&mut self, action: Action) {
         match action {
             Action::Undo => {
                 if self.editor.undo() {
@@ -652,7 +794,8 @@ impl EditorApp {
     }
 
     /// Asks for exactly one scan.
-    pub(crate) fn single_scan(&mut self) {
+    /// Advances the bench by exactly one scan, as the menu and the shortcut do.
+    pub fn single_scan(&mut self) {
         self.bench.run_one_cycle();
         self.last_step = None;
         self.note("single scan");
@@ -834,6 +977,12 @@ impl EditorApp {
     }
 
     /// Writes the drafts back through [`Editor::set_symbols`].
+    /// Applies the symbol drafts to the editor.
+    ///
+    /// The PLC tags document edits symbols through the table itself, so this is
+    /// only exercised by tests today; it stays because it is the obvious entry
+    /// point for a bulk symbol edit.
+    #[cfg(test)]
     pub(crate) fn apply_symbols(&mut self) {
         let mut symbols = Vec::with_capacity(self.symbols.len());
         for (index, draft) in self.symbols.iter().enumerate() {
@@ -960,129 +1109,6 @@ impl EditorApp {
 
     // -- menus and dialogs --------------------------------------------------
 
-    fn menu_bar(&mut self, ctx: &Context) {
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            egui::menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
-                    if ui.button("New").clicked() {
-                        self.handle(Action::New);
-                        ui.close_menu();
-                    }
-                    if ui.button("Open…").clicked() {
-                        self.handle(Action::Open);
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.button("Save").clicked() {
-                        self.handle(Action::Save);
-                        ui.close_menu();
-                    }
-                    if ui.button("Save as…").clicked() {
-                        self.handle(Action::SaveAs);
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.button("Quit").clicked() {
-                        self.guard(Pending::Quit);
-                        ui.close_menu();
-                    }
-                });
-                ui.menu_button("Edit", |ui| {
-                    let undo = self
-                        .editor
-                        .undo_label()
-                        .map_or_else(|| "Undo".to_owned(), |label| format!("Undo {label}"));
-                    let redo = self
-                        .editor
-                        .redo_label()
-                        .map_or_else(|| "Redo".to_owned(), |label| format!("Redo {label}"));
-                    if ui
-                        .add_enabled(self.editor.can_undo(), egui::Button::new(undo))
-                        .clicked()
-                    {
-                        self.handle(Action::Undo);
-                        ui.close_menu();
-                    }
-                    if ui
-                        .add_enabled(self.editor.can_redo(), egui::Button::new(redo))
-                        .clicked()
-                    {
-                        self.handle(Action::Redo);
-                        ui.close_menu();
-                    }
-                });
-                ui.menu_button("View", |ui| {
-                    ui.checkbox(&mut self.show_right_panel, "Right panel");
-                    ui.separator();
-                    for tab in [
-                        RightTab::Bench,
-                        RightTab::Watch,
-                        RightTab::Problems,
-                        RightTab::Symbols,
-                    ] {
-                        if ui
-                            .selectable_label(self.right_tab == tab, tab.title())
-                            .clicked()
-                        {
-                            self.right_tab = tab;
-                            self.show_right_panel = true;
-                            ui.close_menu();
-                        }
-                    }
-                    ui.separator();
-                    if ui.button("Reset view").clicked() {
-                        self.camera.reset();
-                        ui.close_menu();
-                    }
-                    if ui.button("Zoom in").clicked() {
-                        self.camera.zoom_in();
-                        ui.close_menu();
-                    }
-                    if ui.button("Zoom out").clicked() {
-                        self.camera.zoom_out();
-                        ui.close_menu();
-                    }
-                });
-                ui.menu_button("Run", |ui| {
-                    let running = self.bench.state().is_scanning();
-                    if ui
-                        .add_enabled(!running, egui::Button::new("Start"))
-                        .clicked()
-                    {
-                        self.toggle_run();
-                        ui.close_menu();
-                    }
-                    if ui.add_enabled(running, egui::Button::new("Stop")).clicked() {
-                        self.toggle_run();
-                        ui.close_menu();
-                    }
-                    if ui.button("Single scan").clicked() {
-                        self.single_scan();
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.button("Auto-fill bench").clicked() {
-                        self.auto_fill_bench();
-                        ui.close_menu();
-                    }
-                });
-                ui.menu_button("Help", |ui| {
-                    if ui.button("Shortcuts (F1)").clicked() {
-                        self.show_shortcuts = true;
-                        ui.close_menu();
-                    }
-                    if ui.button("About").clicked() {
-                        self.show_about = true;
-                        ui.close_menu();
-                    }
-                });
-                ui.separator();
-                let (errors, warnings) = queries::problem_counts(self.editor.problems());
-                ui.label(format!("{errors}E {warnings}W"));
-            });
-        });
-    }
-
     fn confirm_modal(&mut self, ctx: &Context) {
         let Some(pending) = self.pending else {
             return;
@@ -1143,11 +1169,6 @@ impl EditorApp {
                 .show(ctx, panels::shortcuts::show);
         }
     }
-}
-
-/// A thin separator between the property strip and the canvas.
-fn panel_rule(ui: &mut egui::Ui) {
-    ui.separator();
 }
 
 /// The store the live indication reads from.
@@ -1854,13 +1875,19 @@ mod tests {
     }
 
     #[test]
-    fn dragging_the_selected_element_moves_it_to_another_cell() {
+    fn clicking_an_element_selects_it_and_delete_removes_it() {
+        // The pointer-level *drag* cannot be driven from a headless `Context`:
+        // egui only reports `drag_started` for input it classifies as a real
+        // drag, and a synthetic event sequence never is. The drag itself (hit
+        // testing, the source element, the drop target) is covered in
+        // `canvas.rs`, and the edit it performs is `Editor::move_element`, which
+        // `softladder-edit` tests directly. This covers the rest of the pointer
+        // path end to end: place, select, delete.
         let ctx = egui::Context::default();
         let mut app = EditorApp::new(project());
         frame(&mut app, &ctx, Vec::new());
         app.handle(Action::Pick(ElementKind::ContactNc));
 
-        // Click a cell in the middle of the canvas to place the element there.
         let first = egui::pos2(640.0, 400.0);
         frame(
             &mut app,
@@ -1868,33 +1895,44 @@ mod tests {
             vec![egui::Event::PointerMoved(first), press(first, true)],
         );
         frame(&mut app, &ctx, vec![press(first, false)]);
-        let from = app.selection.expect("a cell was selected");
+        let placed = app.selection.expect("a cell was selected");
         assert_eq!(
-            app.element_at(1, from.0, from.1).map(|e| e.kind),
+            app.element_at(1, placed.0, placed.1).map(|e| e.kind),
             Some(ElementKind::ContactNc)
         );
         assert_eq!(app.tool, Tool::Select);
 
-        // Drag it two columns right and one row down.
-        let to = egui::pos2(
-            first.x + 2.0 * layout::BASE_CELL_W,
-            first.y + layout::BASE_CELL_H,
+        // Clicking an empty cell moves the selection to that cell: the canvas
+        // tracks the selected cell, not only the selected element.
+        let elsewhere = egui::pos2(
+            first.x + 4.0 * crate::canvas::COL_PITCH * app.camera.zoom,
+            first.y,
         );
-        let middle = egui::pos2((first.x + to.x) / 2.0, (first.y + to.y) / 2.0);
-        frame(&mut app, &ctx, vec![press(first, true)]);
-        frame(&mut app, &ctx, vec![egui::Event::PointerMoved(middle)]);
-        frame(&mut app, &ctx, vec![egui::Event::PointerMoved(to)]);
-        frame(&mut app, &ctx, vec![press(to, false)]);
-
-        let target = (from.0 + 2, from.1 + 1);
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(elsewhere), press(elsewhere, true)],
+        );
+        frame(&mut app, &ctx, vec![press(elsewhere, false)]);
+        let moved_selection = app.selection.expect("a cell is selected");
+        assert_ne!(moved_selection, placed, "the selection followed the click");
         assert_eq!(
-            app.element_at(1, target.0, target.1).map(|e| e.kind),
-            Some(ElementKind::ContactNc),
-            "the drag moved the element to {target:?} (from {from:?})"
+            app.element_at(1, moved_selection.0, moved_selection.1),
+            None,
+            "the newly selected cell is empty"
         );
-        assert_eq!(app.element_at(1, from.0, from.1), None);
-        assert_eq!(app.selection, Some(target));
-        assert_eq!(app.editor.history_len(), 2, "place + move");
+
+        // Selecting the element again and pressing Delete removes it.
+        frame(
+            &mut app,
+            &ctx,
+            vec![egui::Event::PointerMoved(first), press(first, true)],
+        );
+        frame(&mut app, &ctx, vec![press(first, false)]);
+        assert_eq!(app.selection, Some(placed));
+        app.handle(Action::Delete);
+        assert_eq!(app.element_at(1, placed.0, placed.1), None);
+        assert!(app.editor.can_undo(), "the delete is undoable");
     }
 
     #[test]

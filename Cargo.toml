@@ -39,3 +39,5 @@ rfd = "0.15"
 tempfile = "3.10"
 insta = { version = "1.40", features = ["json"] }
 proptest = "1.5"
+# Dev-only: the headless screenshot harness encodes PNGs.
+image = { version = "0.25", default-features = false, features = ["png"] }

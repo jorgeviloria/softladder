@@ -3231,6 +3231,7 @@ version = "0.0.1"
 dependencies = [
  "eframe",
  "egui",
+ "image",
  "rfd",
  "softladder-core",
  "softladder-edit",

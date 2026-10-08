@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — UI/UX redesign
+
+The editor's interface was rebuilt against the tools people actually program PLCs
+with (TIA Portal, Studio 5000, CODESYS, TwinCAT, GX Works, Sysmac Studio, Control
+Expert); `docs/UX.md` is the spec and records what is deliberately not copied.
+
+### Added
+
+- A design system (`softladder-ui::design`): one light "paper" theme and a dark
+  one, a 4/8/12/16/24 spacing scale, a 11/12/13/20 type scale, corner radii,
+  hairlines, pills, cards and empty states — plus contrast tests.
+- `softladder-ui::symbols`: the IEC glyphs drawn as schematics (contacts, edge
+  contacts, coils, blocks with named pins, expression boxes), shared by the
+  canvas and the palette so an element looks the same everywhere, including a
+  live (energised) style.
+- The application shell: a ribbon with labelled command groups (History, File,
+  Online, View, Insert), a menu bar, document tabs with an accent underline, a
+  project tree, a context-sensitive inspector and a status bar of badges and
+  pills.
+- The ladder document: networks with `Network <n>`, title, wrapped comment and a
+  state badge; tag names over addresses; a fitted camera; live power flow with
+  inline values; hover, selection, a ghost while placing, pan/zoom and a context
+  menu.
+- PLC tags as a first-class document (name, type, address, comment, "used by"),
+  the watch & force table (format, modify, force, with a warning banner while a
+  force is active), an operator-screen simulation bench (toggles, spring-back
+  push-buttons, glowing lamps, sliders, gauges) and a diagnostics table.
+- **Headless screenshots**: `crates/softladder-ui/tests/ui_shots.rs` rasterises a
+  real frame (tessellated shapes plus the font atlas) into PNGs under
+  `target/ui-shots/`, so the interface can be reviewed and iterated without a
+  display server. Dev-only: nothing is added to the shipped binary.
+- `EditorApp::{set_variable, variable}` so scripts and the harness can set bench
+  inputs without a mouse.
+
+### Changed
+
+- The palette is grouped by family (Tool, Bit logic, Coils, Timers, Counters,
+  Data, Program control) with icons, labels, tooltips and an armed state, instead
+  of two rows of raw glyph text.
+- The left pane is a project tree instead of a flat list that dumped whole
+  comments; the right pane is an inspector instead of a duplicate tab.
+
 ## [Unreleased] — M3 ClassicLadder compatibility
 
 ### Added

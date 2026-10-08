@@ -320,6 +320,17 @@ Hitos de calidad transversales: cada hito añade sus tests, sus docs y su entrad
 - Ejemplo semilla `examples/traffic_light.slprj` y `examples/README.md`.
 - `softladder-cli` ejecuta un proyecto en modo headless (esqueleto funcional del ciclo de scan).
 
+**Rediseño de UI/UX (antes de M4)**: la interfaz del MVP de M2 era un muro de texto diminuto sin
+jerarquía visual, así que se rehizo contra las herramientas de referencia del sector (TIA Portal,
+Studio 5000, CODESYS, TwinCAT, GX Works, Sysmac Studio, Control Expert). El diseño objetivo y sus
+convenciones están en `docs/UX.md`; el resultado son tokens de diseño propios (tema claro "papel",
+escala de espaciado y tipografía, iconos vectoriales), un armazón con ribbon agrupado, pestañas de
+documento e inspector, un árbol de proyecto, una paleta de instrucciones por familias, un documento
+de ladder con redes numeradas y estado en vivo, una tabla de tags, una de watch & force, un banco de
+pruebas tipo pantalla de operador y una barra de estado con badges. La revisión se hace con capturas
+headless (`crates/softladder-ui/tests/ui_shots.rs` → `target/ui-shots/`), porque no hay servidor
+gráfico.
+
 **Siguiente paso inmediato**: M4 — SFC/Grafcet (modelo, motor y editor) sobre el mismo corpus
 secuencial, más el cierre de las divergencias de comportamiento listadas en
 `testdata/known-divergences.md`.

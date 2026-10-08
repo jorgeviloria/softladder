@@ -32,14 +32,20 @@ use softladder_project::native;
 
 pub mod app;
 pub mod canvas;
+pub mod design;
 pub mod fileops;
 pub mod layout;
 pub mod palette;
 pub mod panels;
 pub mod queries;
+pub mod shell;
 pub mod shortcuts;
+pub mod symbols;
+pub mod watch;
 
-pub use app::{EditorApp, RightTab, SymbolDraft, Tool};
+pub use app::{CentreTab, EditorApp, RightTab, SymbolDraft, Tool};
+pub use design::{Theme, Tokens};
+pub use watch::{ValueFormat, WatchRow};
 
 /// Project opened at start-up, relative to the current working directory.
 pub const STARTUP_PROJECT: &str = "examples/traffic_light.slprj";
