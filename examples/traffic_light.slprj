@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "name": "traffic_light",
+  "author": "SoftLadder contributors",
+  "comment": "Minimal traffic-light / start-stop example used by the tests and by the editor at start-up.",
+  "sections": [
+    {
+      "id": 1,
+      "name": "Main",
+      "language": "Ladder",
+      "subroutine": null,
+      "rungs": [1, 2, 3]
+    }
+  ],
+  "rungs": [
+    {
+      "id": 1,
+      "label": "start / self-hold",
+      "comment": "The start button %I0 latches the green lamp %Q0 through its own contact.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 0, "index_expr": null, "bit": null }, "col": 0, "row": 0, "params": [] },
+        { "kind": "ContactNo", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "bit": null }, "col": 1, "row": 1, "params": [] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "bit": null }, "col": 2, "row": 0, "params": [] }
+      ]
+    },
+    {
+      "id": 2,
+      "label": "amber after 3 s",
+      "comment": "TON %TM0 delays the amber lamp %Q1 by 3000 ms after the green lamp is on.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "bit": null }, "col": 0, "row": 0, "params": [] },
+        { "kind": { "Timer": { "mode": "On" } }, "var": { "kind": "TimerIec", "index": 0, "index_expr": null, "bit": null }, "col": 1, "row": 0, "params": ["3000"] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "bit": null }, "col": 2, "row": 0, "params": [] }
+      ]
+    },
+    {
+      "id": 3,
+      "label": "vehicle counter",
+      "comment": "CTU %C0 counts %I1 and, once five vehicles passed, mirrors the done bit on %M0 and bumps %MW0.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 1, "index_expr": null, "bit": null }, "col": 0, "row": 0, "params": [] },
+        { "kind": { "Counter": { "kind": "Up" } }, "var": { "kind": "Counter", "index": 0, "index_expr": null, "bit": null }, "col": 1, "row": 0, "params": ["5"] },
+        { "kind": "Operate", "var": null, "col": 2, "row": 0, "params": ["%MW0", "=", "%MW0 + 1"] },
+        { "kind": "CoilOut", "var": { "kind": "MemBit", "index": 0, "index_expr": null, "bit": null }, "col": 3, "row": 0, "params": [] }
+      ]
+    }
+  ],
+  "symbols": [
+    { "name": "start_button", "comment": "Start / acknowledge push-button", "unit": null },
+    { "name": "green_lamp", "comment": "Traffic light, green aspect", "unit": null },
+    { "name": "amber_lamp", "comment": "Traffic light, amber aspect", "unit": null },
+    { "name": "vehicle_count", "comment": "Vehicles seen since the counter was reset", "unit": "veh" }
+  ],
+  "scan": {
+    "period_ms": 10,
+    "input_period_ms": 10
+  }
+}

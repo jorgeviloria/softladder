@@ -1,0 +1,22 @@
+[package]
+name = "softladder-ui"
+description = "eframe/egui desktop editor for SoftLadder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lib]
+name = "softladder_ui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "softladder-editor"
+path = "src/main.rs"
+
+[dependencies]
+softladder-core = { path = "../softladder-core" }
+softladder-project = { path = "../softladder-project" }
+eframe = { workspace = true }
+egui = { workspace = true }

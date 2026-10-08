@@ -1,0 +1,391 @@
+//! The ladder-logic project model.
+//!
+//! A [`Project`] owns a flat list of [`Rung`]s and a list of [`Section`]s that
+//! reference those rungs by id. Keeping the rungs flat means a section can be
+//! re-ordered or shared without duplicating element data, and it mirrors the
+//! way the ClassicLadder container stores one file per rung.
+//!
+//! All types in this module are plain data: they carry no behaviour, perform
+//! no I/O and always round-trip through `serde`.
+
+use serde::{Deserialize, Serialize};
+
+use crate::vars::VarRef;
+
+/// Flavour of an IEC 61131-3 timer block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum TimerMode {
+    /// On-delay timer (TON).
+    #[default]
+    On,
+    /// Off-delay timer (TOF).
+    Off,
+    /// Pulse timer (TP), a one-shot of the preset length.
+    Pulse,
+}
+
+/// Flavour of a counter block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum CounterKind {
+    /// Count up (CTU).
+    #[default]
+    Up,
+    /// Count down (CTD).
+    Down,
+    /// Count up and down (CTUD).
+    UpDown,
+}
+
+/// Flavour of a register block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum RegisterMode {
+    /// First in, first out.
+    #[default]
+    Fifo,
+    /// Last in, first out.
+    Lifo,
+}
+
+/// Kind of ladder element placed on a rung.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum ElementKind {
+    /// Normally-open contact `-[ ]-`.
+    #[default]
+    ContactNo,
+    /// Normally-closed contact `-[/]-`.
+    ContactNc,
+    /// Rising-edge contact `-[P]-`.
+    ContactRising,
+    /// Falling-edge contact `-[N]-`.
+    ContactFalling,
+    /// Normal output coil `-( )-`.
+    CoilOut,
+    /// Negated output coil `-(/)-`.
+    CoilOutNeg,
+    /// Set (latch) coil `-(S)-`.
+    CoilSet,
+    /// Reset (unlatch) coil `-(R)-`.
+    CoilReset,
+    /// Jump coil `-(J)-`.
+    CoilJump,
+    /// Subroutine call coil `-(C)-`.
+    CoilCall,
+    /// IEC timer block.
+    Timer {
+        /// Timer flavour.
+        mode: TimerMode,
+    },
+    /// Counter block.
+    Counter {
+        /// Counter flavour.
+        kind: CounterKind,
+    },
+    /// Comparison block.
+    Compare,
+    /// Arithmetic / assignment block.
+    Operate,
+    /// Register (FIFO/LIFO) block.
+    Register {
+        /// Register flavour.
+        mode: RegisterMode,
+    },
+    /// Connection used to draw parallel branches between elements.
+    Connection,
+}
+
+impl ElementKind {
+    /// `true` for every output coil variant.
+    pub fn is_coil(self) -> bool {
+        matches!(
+            self,
+            ElementKind::CoilOut
+                | ElementKind::CoilOutNeg
+                | ElementKind::CoilSet
+                | ElementKind::CoilReset
+                | ElementKind::CoilJump
+                | ElementKind::CoilCall
+        )
+    }
+
+    /// `true` for every contact variant.
+    pub fn is_contact(self) -> bool {
+        matches!(
+            self,
+            ElementKind::ContactNo
+                | ElementKind::ContactNc
+                | ElementKind::ContactRising
+                | ElementKind::ContactFalling
+        )
+    }
+
+    /// `true` for the function blocks that carry a preset in `params`.
+    pub fn is_block(self) -> bool {
+        matches!(
+            self,
+            ElementKind::Timer { .. } | ElementKind::Counter { .. } | ElementKind::Register { .. }
+        )
+    }
+}
+
+/// An element placed at a `(column, row)` position on a rung.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct PlacedElement {
+    /// What the element is.
+    pub kind: ElementKind,
+    /// Variable the element reads or drives; `Connection` elements have none.
+    pub var: Option<VarRef>,
+    /// Zero-based column, increasing from the left power rail.
+    pub col: u8,
+    /// Zero-based row, increasing downwards. Rows are parallel branches.
+    pub row: u8,
+    /// Free-form parameters: timer/counter preset, operate target and
+    /// expression, comparison operands and operator, and so on.
+    pub params: Vec<String>,
+}
+
+impl PlacedElement {
+    /// Creates an element with no variable and no parameters.
+    pub fn new(kind: ElementKind, col: u8, row: u8) -> Self {
+        Self {
+            kind,
+            var: None,
+            col,
+            row,
+            params: Vec::new(),
+        }
+    }
+
+    /// Creates an element bound to `var`.
+    pub fn with_var(kind: ElementKind, var: VarRef, col: u8, row: u8) -> Self {
+        Self {
+            kind,
+            var: Some(var),
+            col,
+            row,
+            params: Vec::new(),
+        }
+    }
+
+    /// Creates an element carrying `params`.
+    pub fn with_params(kind: ElementKind, col: u8, row: u8, params: &[&str]) -> Self {
+        Self {
+            kind,
+            var: None,
+            col,
+            row,
+            params: params.iter().map(|p| (*p).to_owned()).collect(),
+        }
+    }
+}
+
+/// A single ladder rung: a horizontal power rail with elements on it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Rung {
+    /// Stable identifier, unique inside the project.
+    pub id: u32,
+    /// Optional short label shown in the editor.
+    pub label: String,
+    /// Optional free-form comment.
+    pub comment: String,
+    /// Elements placed on the rung, in no particular order.
+    pub elements: Vec<PlacedElement>,
+}
+
+impl Rung {
+    /// Creates an empty rung with the given id.
+    pub fn new(id: u32) -> Self {
+        Self {
+            id,
+            ..Self::default()
+        }
+    }
+
+    /// Returns the elements of `row` sorted by column.
+    pub fn row(&self, row: u8) -> Vec<&PlacedElement> {
+        let mut elements: Vec<&PlacedElement> =
+            self.elements.iter().filter(|e| e.row == row).collect();
+        elements.sort_by_key(|e| e.col);
+        elements
+    }
+
+    /// The number of distinct rows used by this rung (at least one).
+    pub fn row_count(&self) -> u8 {
+        self.elements
+            .iter()
+            .map(|e| e.row)
+            .max()
+            .map_or(1, |max| max.saturating_add(1))
+    }
+}
+
+/// Language a section is written in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum SectionLanguage {
+    /// Relay ladder diagram (executed from M0 onwards).
+    #[default]
+    Ladder,
+    /// Sequential function chart (executed from M4 onwards).
+    Sfc,
+}
+
+/// A named group of rungs, optionally a subroutine.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Section {
+    /// Stable identifier, unique inside the project.
+    pub id: u32,
+    /// Display name.
+    pub name: String,
+    /// Language the section is written in.
+    pub language: SectionLanguage,
+    /// When set, the section is a subroutine called with this index.
+    pub subroutine: Option<u32>,
+    /// Ids of the rungs the section executes, in execution order.
+    pub rungs: Vec<u32>,
+}
+
+impl Section {
+    /// Creates an empty ladder section.
+    pub fn new(id: u32, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            language: SectionLanguage::Ladder,
+            subroutine: None,
+            rungs: Vec::new(),
+        }
+    }
+}
+
+/// A named symbol (mnemonic) attached to a variable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct Symbol {
+    /// Symbolic name.
+    pub name: String,
+    /// Human readable description.
+    pub comment: String,
+    /// Optional engineering unit.
+    pub unit: Option<String>,
+}
+
+/// Scan timing configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScanConfig {
+    /// Target period between two scans, in milliseconds.
+    pub period_ms: u32,
+    /// Target period between two physical input reads, in milliseconds.
+    pub input_period_ms: u32,
+}
+
+impl Default for ScanConfig {
+    fn default() -> Self {
+        Self {
+            period_ms: 10,
+            input_period_ms: 10,
+        }
+    }
+}
+
+/// A complete SoftLadder project.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Project {
+    /// Format version of the project file; always at least 1.
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
+    /// Project name.
+    pub name: String,
+    /// Author of the project.
+    pub author: String,
+    /// Free-form project comment.
+    pub comment: String,
+    /// Sections in execution order.
+    pub sections: Vec<Section>,
+    /// All rungs of the project, referenced by sections.
+    pub rungs: Vec<Rung>,
+    /// Symbol table.
+    pub symbols: Vec<Symbol>,
+    /// Scan timing configuration.
+    pub scan: ScanConfig,
+}
+
+/// Current project schema version.
+pub const SCHEMA_VERSION: u32 = 1;
+
+fn default_schema_version() -> u32 {
+    SCHEMA_VERSION
+}
+
+impl Default for Project {
+    fn default() -> Self {
+        Self {
+            schema_version: SCHEMA_VERSION,
+            name: String::new(),
+            author: String::new(),
+            comment: String::new(),
+            sections: Vec::new(),
+            rungs: Vec::new(),
+            symbols: Vec::new(),
+            scan: ScanConfig::default(),
+        }
+    }
+}
+
+impl Project {
+    /// Creates an empty project with the given name.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Looks up a rung by id.
+    pub fn rung(&self, id: u32) -> Option<&Rung> {
+        self.rungs.iter().find(|rung| rung.id == id)
+    }
+
+    /// Looks up a rung by id, mutably.
+    pub fn rung_mut(&mut self, id: u32) -> Option<&mut Rung> {
+        self.rungs.iter_mut().find(|rung| rung.id == id)
+    }
+
+    /// Looks up a section by id.
+    pub fn section(&self, id: u32) -> Option<&Section> {
+        self.sections.iter().find(|section| section.id == id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_project_is_schema_version_one() {
+        assert_eq!(Project::default().schema_version, 1);
+        assert_eq!(ScanConfig::default().period_ms, 10);
+    }
+
+    #[test]
+    fn rung_rows_are_sorted_by_column() {
+        let mut rung = Rung::new(7);
+        rung.elements
+            .push(PlacedElement::new(ElementKind::ContactNo, 4, 0));
+        rung.elements
+            .push(PlacedElement::new(ElementKind::ContactNo, 1, 0));
+        rung.elements
+            .push(PlacedElement::new(ElementKind::ContactNo, 2, 1));
+        let row0: Vec<u8> = rung.row(0).iter().map(|e| e.col).collect();
+        assert_eq!(row0, vec![1, 4]);
+        assert_eq!(rung.row_count(), 2);
+    }
+
+    #[test]
+    fn element_kind_classification() {
+        assert!(ElementKind::ContactNc.is_contact());
+        assert!(ElementKind::CoilReset.is_coil());
+        assert!(ElementKind::Timer {
+            mode: TimerMode::On
+        }
+        .is_block());
+        assert!(!ElementKind::Connection.is_coil());
+    }
+}

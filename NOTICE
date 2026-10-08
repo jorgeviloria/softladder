@@ -1,0 +1,36 @@
+SoftLadder
+==========
+
+Copyright 2025 Jorge Viloria
+
+SoftLadder is a clean-room, from-scratch reimplementation of the ideas and
+file-format conventions of ClassicLadder in Rust. It is licensed to the public
+under the terms of the MIT license or the Apache License, Version 2.0, at your
+option (see LICENSE-MIT and LICENSE-APACHE).
+
+Prior art acknowledgement
+-------------------------
+
+ClassicLadder
+  A ladder-logic PLC editor and runtime originally written in C by
+  Marc Le Douarain and contributors.
+  Project home: https://github.com/MaVaTi56/classicladder
+  License: GNU Lesser General Public License (LGPL) v2.1 or later.
+
+  SoftLadder reuses the *ideas* of ClassicLadder: its programming model, the
+  `%`-notation for variable references, the naming of ladder elements and the
+  layout of the text project container. No ClassicLadder source code has been
+  copied, translated, ported or otherwise incorporated into SoftLadder.
+
+Clean-room statement
+--------------------
+
+This project is a clean-room reimplementation. Its implementation was written
+from the published behaviour and documentation of ClassicLadder, and from the
+on-disk file formats that ClassicLadder reads and writes, without copying or
+mechanically translating any C source code. Consequently SoftLadder is not a
+derivative work of ClassicLadder and is distributed under the permissive
+licenses named above rather than under the LGPL.
+
+Users migrating from ClassicLadder remain responsible for the licensing of
+their own project files and of the ClassicLadder build they migrate from.

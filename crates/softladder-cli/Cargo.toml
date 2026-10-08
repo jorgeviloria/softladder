@@ -1,0 +1,27 @@
+[package]
+name = "softladder-cli"
+description = "Command line interface for SoftLadder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[lib]
+name = "softladder_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "softladder"
+path = "src/main.rs"
+
+[dependencies]
+softladder-core = { path = "../softladder-core" }
+softladder-project = { path = "../softladder-project" }
+softladder-runtime = { path = "../softladder-runtime" }
+softladder-io = { path = "../softladder-io" }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

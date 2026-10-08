@@ -1,0 +1,13 @@
+[package]
+name = "softladder-runtime"
+description = "Runtime supervisor, scan statistics and flight recorder for SoftLadder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+softladder-core = { path = "../softladder-core" }
+softladder-project = { path = "../softladder-project" }
+thiserror = { workspace = true }
