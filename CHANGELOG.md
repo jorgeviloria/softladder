@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — function block pins
+
+### Fixed
+
+- **A block's drawn pins are now the rows the engine reads.** The timer drew `IN` *and* `PT` as input
+  pins, but the engine only reads the enable — the preset is a parameter — so `PT` could never be
+  connected to anything. `ElementKind::input_pins` is now the single source of truth for how many
+  rows a block reads, what each one means, and what the canvas draws (and for the band height, so no
+  pin falls outside the network). A timer shows `IN`; a counter its four (`R`, `LD`, `CU`, `CD`); a
+  register its three (`R`, `IN`, `OUT`).
+- A block's **parameter** is labelled as a parameter (`%TM0 · PT 3000`, `%C0 · PV 5`) instead of
+  looking like a pin.
+
 ## [Unreleased] — M4 sequential (engine and interoperability)
 
 ### Added

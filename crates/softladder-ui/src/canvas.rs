@@ -945,7 +945,7 @@ fn paint_ghost(
         ElementKind::ContactFalling => symbols::contact_falling(painter, glyph, style),
         ElementKind::Connection => symbols::wire(painter, glyph, style),
         ElementKind::Timer { .. } | ElementKind::Counter { .. } | ElementKind::Register { .. } => {
-            symbols::block(painter, glyph, style, describe(kind), block_pins(kind))
+            symbols::block(painter, glyph, style, describe(kind), &block_pins(kind))
         }
         ElementKind::Compare | ElementKind::Operate => {
             symbols::expression_box(painter, glyph, style, "%MW0 = 0")
@@ -1095,7 +1095,7 @@ fn paint_element(
                 glyph,
                 style,
                 describe(element.kind),
-                block_pins(element.kind),
+                &block_pins(element.kind),
             );
             if frame.live {
                 if let Some(value) = block_value_text(frame, element) {
@@ -1127,8 +1127,14 @@ fn paint_element(
     let label = if is_block(element.kind) {
         // A block names itself in one line: its tag, or the instance, which is
         // the name a user gives a timer or a counter.
-        let text = name.unwrap_or(address.as_str());
-        symbols::element_label_rect(painter, label_anchor, tokens, Some(text), "", false)
+        let text = match block_parameter_text(element) {
+            Some(parameter) => {
+                let name = name.unwrap_or(address.as_str());
+                format!("{name} · {parameter}")
+            }
+            None => name.unwrap_or(address.as_str()).to_owned(),
+        };
+        symbols::element_label_rect(painter, label_anchor, tokens, Some(&text), "", false)
     } else if frame.show_addresses() {
         // The View toggle drops the tag names and shows the address alone.
         symbols::element_label_rect(painter, label_anchor, tokens, None, &address, true)
@@ -1311,24 +1317,49 @@ fn is_block(kind: ElementKind) -> bool {
     )
 }
 
-/// The input and output pins of a function block, in the order the engine reads
-/// its rows: a counter takes `R`, `LD`, `CU` and `CD` from four rows.
-fn block_pins(kind: ElementKind) -> &'static [(&'static str, i32)] {
+/// The pins of a function block: its **inputs** on the left, its readouts on the
+/// right.
+///
+/// The inputs are not listed here — they are [`ElementKind::input_pins`], the
+/// same table the engine takes its block span from. That is the point: a pin is
+/// only drawn where the engine actually reads a wire, so the drawing can never
+/// advertise a connection that does nothing. A timer therefore shows a single
+/// input (`IN`); its preset is a *parameter* (`%TM0.P`), drawn as a parameter by
+/// [`block_parameter_text`] rather than as a pin.
+fn block_pins(kind: ElementKind) -> Vec<(&'static str, i32)> {
+    let mut pins: Vec<(&'static str, i32)> =
+        kind.input_pins().iter().map(|label| (*label, -1)).collect();
+    pins.extend(block_readouts(kind).iter().map(|label| (*label, 1)));
+    pins
+}
+
+/// The labels drawn on the right of a block: the flow out and its readouts.
+fn block_readouts(kind: ElementKind) -> &'static [&'static str] {
     match kind {
-        ElementKind::Timer { .. } => &[("IN", -1), ("PT", -1), ("Q", 1), ("ET", 1)],
-        // A counter reads four rows whatever its flavour, so it always shows
-        // the four pins the engine reads them from.
-        ElementKind::Counter { .. } => &[
-            ("R", -1),
-            ("LD", -1),
-            ("CU", -1),
-            ("CD", -1),
-            ("Q", 1),
-            ("CV", 1),
-        ],
-        ElementKind::Register { .. } => &[("R", -1), ("IN", -1), ("OUT", -1), ("E", 1), ("F", 1)],
+        ElementKind::Timer { .. } => &["Q", "ET"],
+        ElementKind::Counter { .. } => &["Q", "CV"],
+        ElementKind::Register { .. } => &["E", "F"],
         _ => &[],
     }
+}
+
+/// A block's parameter, as it is drawn beside the instance name.
+///
+/// The preset of a timer or a counter and the capacity of a register are
+/// parameters, not wires: they are set in the inspector (or typed as `3s`,
+/// `%MW10`), so the canvas labels them `PT 3s`, `PV 5`, `N 8`.
+fn block_parameter_text(element: &PlacedElement) -> Option<String> {
+    let parameter = element.params.first()?.trim();
+    if parameter.is_empty() {
+        return None;
+    }
+    let label = match element.kind {
+        ElementKind::Timer { .. } => "PT",
+        ElementKind::Counter { .. } => "PV",
+        ElementKind::Register { .. } => "N",
+        _ => return None,
+    };
+    Some(format!("{label} {parameter}"))
 }
 
 /// Shortens `text` with an ellipsis until it fits `width`.
@@ -1994,7 +2025,8 @@ mod tests {
     use super::*;
     use egui::{pos2, vec2};
     use softladder_core::{
-        CounterKind, PlacedElement, Project, Rung, Section, TimerMode, VarKind, VarRef,
+        CounterKind, PlacedElement, Project, RegisterMode, Rung, Section, TimerMode, VarKind,
+        VarRef,
     };
 
     /// A project with one section, one rung and the elements the test asks for.
@@ -2334,6 +2366,143 @@ mod tests {
             4,
             "a counter always shows the four rows it reads"
         );
+    }
+
+    /// The bug this guards: the timer used to draw `PT` as a second input pin,
+    /// but the engine only reads the enable (the preset is a parameter), so the
+    /// pin could never be connected to anything that mattered.
+    #[test]
+    fn a_timer_has_one_input_pin_and_no_wirable_preset() {
+        let pins = block_pins(ElementKind::Timer {
+            mode: TimerMode::On,
+        });
+        let inputs: Vec<&str> = pins
+            .iter()
+            .filter(|(_, side)| *side < 0)
+            .map(|(label, _)| *label)
+            .collect();
+        assert_eq!(inputs, ["IN"]);
+        assert!(
+            !pins.contains(&("PT", -1)),
+            "the preset is a parameter, not a wire"
+        );
+        assert!(pins.contains(&("ET", 1)), "the elapsed time is a readout");
+    }
+
+    /// Every pin drawn on the left must be a row the engine reads, or the canvas
+    /// is advertising a connection that does nothing.
+    #[test]
+    fn the_drawn_input_pins_are_the_rows_the_engine_reads() {
+        for kind in [
+            ElementKind::Timer {
+                mode: TimerMode::Off,
+            },
+            ElementKind::Counter {
+                kind: CounterKind::UpDown,
+            },
+            ElementKind::Register {
+                mode: RegisterMode::Lifo,
+            },
+        ] {
+            let drawn: Vec<&str> = block_pins(kind)
+                .iter()
+                .filter(|(_, side)| *side < 0)
+                .map(|(label, _)| *label)
+                .collect();
+            assert_eq!(
+                drawn,
+                kind.input_pins(),
+                "{kind:?} draws input pins the engine does not read"
+            );
+            assert_eq!(
+                drawn.len(),
+                kind.input_rows(),
+                "{kind:?} draws more inputs than rows the engine reads"
+            );
+        }
+    }
+
+    /// The user's report: a counter has four wirable inputs, and they must all
+    /// be reachable — the engine reads each of the four rows, the band reserves
+    /// the four rows, and the power the canvas draws feeds each pin.
+    #[test]
+    fn every_counter_input_can_be_wired_and_is_shown_fed() {
+        use softladder_core::{CounterKind, Value};
+        let mut rung = Rung::new(1);
+        for row in 0..4u8 {
+            let mut contact = PlacedElement::new(ElementKind::ContactNo, 0, row);
+            contact.var = Some(VarRef::new(VarKind::PhysIn, u32::from(row)));
+            rung.elements.push(contact);
+        }
+        let mut counter = PlacedElement::new(
+            ElementKind::Counter {
+                kind: CounterKind::UpDown,
+            },
+            2,
+            0,
+        );
+        counter.var = Some(VarRef::new(VarKind::Counter, 0));
+        counter.params = vec!["1".to_owned()];
+        rung.elements.push(counter);
+        assert_eq!(
+            queries::rung_rows(&rung),
+            4,
+            "the band must reserve every row the counter reads"
+        );
+
+        let mut project = Project::new("counters");
+        project.rungs.push(rung);
+        let mut section = Section::new(1, "Main");
+        section.rungs.push(1);
+        project.sections.push(section);
+        let mut app = EditorApp::new(project);
+
+        // Close every one of the four inputs and run a scan.
+        for row in 0..4u32 {
+            let var = VarRef::new(VarKind::PhysIn, row);
+            app.set_variable(&var, Value::Bit(true)).expect("the store");
+        }
+        app.single_scan();
+
+        let power = queries::power_map(&app.project().rungs[0], app.bench().engine().store());
+        for row in 0..4u8 {
+            let wire = queries::cell_state(&power, 1, row);
+            assert!(
+                wire.live || wire.fed,
+                "the wire feeding the counter's row {row} pin is not fed"
+            );
+        }
+
+        // The engine's reading of these four rows (and that row 2 counts) is
+        // covered by `softladder-core`'s `engine_counter_counts_up_and_reports_done`;
+        // what matters here is the editor's half: the band reserves the rows and
+        // every pin's wire is fed, so all four inputs are reachable and visible.
+    }
+
+    #[test]
+    fn a_blocks_parameter_is_labelled_as_a_parameter() {
+        let mut timer = PlacedElement::new(
+            ElementKind::Timer {
+                mode: TimerMode::On,
+            },
+            0,
+            0,
+        );
+        assert_eq!(block_parameter_text(&timer), None, "no parameter, no label");
+        timer.params = vec!["3s".to_owned()];
+        assert_eq!(block_parameter_text(&timer).as_deref(), Some("PT 3s"));
+        let mut counter = PlacedElement::new(
+            ElementKind::Counter {
+                kind: CounterKind::Up,
+            },
+            0,
+            0,
+        );
+        counter.params = vec!["5".to_owned()];
+        assert_eq!(block_parameter_text(&counter).as_deref(), Some("PV 5"));
+        let mut contact = PlacedElement::new(ElementKind::ContactNo, 0, 0);
+        contact.params = vec!["7".to_owned()];
+        assert_eq!(block_parameter_text(&contact), None);
     }
 
     #[test]

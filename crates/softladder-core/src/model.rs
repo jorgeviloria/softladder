@@ -127,6 +127,36 @@ impl ElementKind {
             ElementKind::Timer { .. } | ElementKind::Counter { .. } | ElementKind::Register { .. }
         )
     }
+
+    /// The labels of the input pins the engine reads, in row order.
+    ///
+    /// This is the **single source of truth** for how many rows a block reads and
+    /// what each of them means: the engine's block span comes from
+    /// [`ElementKind::input_rows`], and the editor draws exactly these pins, so
+    /// the drawing cannot advertise a wire the engine never reads. A timer has
+    /// one input (its enable — the preset is a *parameter*, `%TM0.P`, not a
+    /// wire), a counter four (`R`, `LD`, `CU`, `CD`) and a register three
+    /// (`R`, `IN`, `OUT`).
+    ///
+    /// The order is the order the engine destructures its inputs in
+    /// (`[reset, load, up, down]`), so a label must not be moved without moving
+    /// the engine with it; `softladder-core`'s tests pin both.
+    pub fn input_pins(self) -> &'static [&'static str] {
+        match self {
+            ElementKind::Timer { .. } => &["IN"],
+            ElementKind::Counter { .. } => &["R", "LD", "CU", "CD"],
+            ElementKind::Register { .. } => &["R", "IN", "OUT"],
+            _ => &[],
+        }
+    }
+
+    /// The rows the element reads as a block, at least one.
+    ///
+    /// Every element occupies at least its own row; a block occupies one row per
+    /// input pin.
+    pub fn input_rows(self) -> usize {
+        self.input_pins().len().max(1)
+    }
 }
 
 /// An element placed at a `(column, row)` position on a rung.
@@ -413,6 +443,59 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The labels are the contract between the engine and the editor, so they are
+    /// pinned here: if one changes, the drawing and the engine's destructuring
+    /// change with it.
+    #[test]
+    fn the_input_pins_are_the_engine_contract() {
+        assert_eq!(
+            ElementKind::Timer {
+                mode: TimerMode::On
+            }
+            .input_pins(),
+            ["IN"]
+        );
+        assert_eq!(
+            ElementKind::Counter {
+                kind: CounterKind::Up
+            }
+            .input_pins(),
+            ["R", "LD", "CU", "CD"]
+        );
+        assert_eq!(
+            ElementKind::Register {
+                mode: RegisterMode::Fifo
+            }
+            .input_pins(),
+            ["R", "IN", "OUT"]
+        );
+        assert_eq!(ElementKind::ContactNo.input_pins(), [] as [&str; 0]);
+    }
+
+    #[test]
+    fn every_element_reads_at_least_its_own_row() {
+        for kind in [
+            ElementKind::ContactNo,
+            ElementKind::CoilOut,
+            ElementKind::Timer {
+                mode: TimerMode::On,
+            },
+            ElementKind::Counter {
+                kind: CounterKind::UpDown,
+            },
+            ElementKind::Register {
+                mode: RegisterMode::Lifo,
+            },
+        ] {
+            assert!(kind.input_rows() >= 1, "{kind:?}");
+            assert_eq!(
+                kind.input_rows(),
+                kind.input_pins().len().max(1),
+                "{kind:?} rows and pins disagree"
+            );
+        }
+    }
 
     #[test]
     fn default_project_carries_the_current_schema_version() {

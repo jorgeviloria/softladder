@@ -2507,11 +2507,10 @@ fn element_text(element: &PlacedElement) -> String {
 
 /// Number of rows a function block occupies, one for a single-cell element.
 fn block_span(kind: ElementKind) -> usize {
-    match kind {
-        ElementKind::Counter { .. } => 4,
-        ElementKind::Register { .. } => 3,
-        _ => 1,
-    }
+    // The rows a block reads *are* its input pins: one source of truth, so the
+    // editor cannot draw a pin the engine does not read
+    // (`ElementKind::input_pins`).
+    kind.input_rows()
 }
 
 /// A function block occupying several rows of one column.

@@ -74,6 +74,21 @@ time base (`"300"` → 100 ms base, `"3s"` → 1 s base, `"5m"` → 60 min base)
 The block's **wire output** (what the next column sees) is its primary flag: `Q` for a timer, `D`
 for a counter, `E` (empty) for a register.
 
+## Function block pins
+
+A block reads **one row per input pin**, and `ElementKind::input_pins` is the single source of truth
+for how many that is and what each row means — the engine's block span and the editor's drawing both
+come from it, so the canvas can never advertise a wire the engine does not read. A parameter is not a
+pin: a preset is data (`%TM0.P`), drawn beside the instance name (`%TM0 · PT 3000`) and edited in the
+inspector.
+
+| Block | Input pins (row 0 first) | What each row does | Readouts |
+| --- | --- | --- | --- |
+| Timer (TON/TOF/TP) | `IN` | the enable; the preset is the `PT` parameter | `Q` (flow out), `ET` |
+| Counter (CTU/CTD/CTUD) | `R`, `LD`, `CU`, `CD` | reset, load the `PV` preset, count up, count down | `Q` (flow out), `CV` |
+| Register (FIFO/LIFO) | `R`, `IN`, `OUT` | reset, push, pop | `E`, `F` |
+| Compare, Operate | — (no pin is drawn) | reads the row it sits on | the result, as the block text |
+
 ## Sequential (SFC)
 
 A chart lives in a `SectionLanguage::Sfc` section as a [`SequentialPage`]: a comment, **steps**
