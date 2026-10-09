@@ -72,9 +72,11 @@ visible in the Problems panel rather than silently dropped.
 
 ## 6. Features SoftLadder has and the format cannot express
 
-A simulation-bench panel, SFC sections, bit accessors (`%MW0.3`), indexed variables in a symbol or an
-expression position the reference cannot address, and columns or rows outside the reference matrix
-are all reported as `SL-W033` on export and simply omitted from the ClassicLadder file. The SoftLadder
+A simulation-bench panel, bit accessors (`%MW0.3`), indexed variables in a symbol or an expression
+position the reference cannot address, and columns or rows outside the reference matrix are all
+reported as `SL-W033` on export and simply omitted from the ClassicLadder file. (SFC sections used to
+be in this list; since M4 they round-trip through `sequential.csv` — see
+[`../docs/COMPAT.md`](../docs/COMPAT.md) §8.4.) The SoftLadder
 project keeps them; the exported copy is lossy by definition and says so.
 
 ## 7. Variable families that are not modelled
@@ -87,7 +89,13 @@ base preserved.
 
 ## Closing these
 
-Items 1 and 2 are cheap to close if a real project needs them: the counter's output rows would become
-three cells instead of one, and `%S8` would become a system bit written by the shift/rotate
-functions. Neither is worth doing before the SFC work (M4), which is where imported sequential
-projects will be measured the same way this corpus was.
+Item 2 is cheap to close and is the next thing to do if a real project reads `%S8`: it would become a
+system bit written by the shift and rotate functions. Item 1 is a different trade: the counter's
+output rows would have to become three cells instead of one, putting the reference's body-cell
+geometry back into the model, for a difference that shows only in a rung that chains off a *secondary*
+row of a block — the flag itself is already readable as a variable (`%C0.E`, `%C0.F`, …). Items 3 to 7
+are the shape of the two implementations rather than gaps to close.
+
+The SFC milestone (M4) has landed, and the sequential projects were measured the way this corpus was:
+eight charts, 73 steps and 100 transitions import, run and round-trip exactly (see
+[`../docs/COMPAT.md`](../docs/COMPAT.md) §8.4).
