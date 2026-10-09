@@ -1378,12 +1378,8 @@ impl ScanEngine {
     /// ClassicLadder's *PrepareSequential*: resets every step and activates the
     /// initial ones.
     fn prepare_sequential(&mut self) {
-        for step in &mut self.store.steps {
-            *step = false;
-        }
-        for age in &mut self.store.step_ages {
-            *age = 0;
-        }
+        self.store.steps.fill(false);
+        self.store.step_ages.fill(0);
         let mut initial: Vec<u32> = Vec::new();
         for section in &self.project.sections {
             let Some(page) = section.sequential_page.as_ref() else {
