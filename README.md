@@ -46,24 +46,23 @@ rebuilds everything around it:
 
 ## Status
 
-**M3 complete — your ClassicLadder projects work.** What you can do today:
+**M3 complete, M4 under way.** The engine runs ladder and ClassicLadder projects work; the SFC
+(Grafcet) language is being finished. What works today:
 
-- **import and export ClassicLadder projects** (`.clp`, `.clprj`, `.clprjz`), validated against all
-  41 upstream example projects: every one imports, `import → export → import` is a fixed point, and
-  the parts SoftLadder does not model (Modbus and serial configuration, IO mapping, alarm slots, …)
-  survive byte for byte. What cannot be represented is reported with a located diagnostic, never
-  dropped silently ([`docs/COMPAT.md`](docs/COMPAT.md), [`testdata/known-divergences.md`](testdata/known-divergences.md));
+- **a real editor UI**, rebuilt against the industrial tools (TIA Portal, Studio 5000, CODESYS,
+  TwinCAT, GX Works): a ribbon of command groups, a project tree, document tabs, a ladder document on
+  paper with numbered networks, tag names over addresses, real IEC blocks and live green power flow,
+  an instruction palette grouped by family, an inspector, a PLC tag table, a watch & force table, an
+  operator-screen simulation bench and a status bar of badges ([`docs/UX.md`](docs/UX.md));
+- **the full ladder engine** — every element, jumps and subroutines, structured diagnostics
+  ([`docs/SEMANTICS.md`](docs/SEMANTICS.md));
+- **ClassicLadder import and export**, validated against all 41 upstream example projects
+  ([`docs/COMPAT.md`](docs/COMPAT.md), [`testdata/known-divergences.md`](testdata/known-divergences.md));
+- `.slprj` schema v2 with a migration chain from v1, and reproducible headless runs
+  (`softladder run` is deterministic by default).
 
-- open, edit and save ladder programs in the desktop editor, with unlimited undo/redo, an element
-  palette, variable validation, problems list and live power-flow indication
-  ([`docs/EDITOR.md`](docs/EDITOR.md));
-- run them on a simulation bench of switches, push-buttons, lamps, sliders and gauges that is saved
-  with the project, so logic can be commissioned before any hardware exists;
-- execute the same program headless and reproducibly (`softladder run` is deterministic by default);
-- rely on a deterministic scan engine with the full element set, jumps/subroutines and structured
-  diagnostics ([`docs/SEMANTICS.md`](docs/SEMANTICS.md));
-- keep programs in `.slprj` schema v2 — the ClassicLadder sub-value spellings (`%TM0.Q`, `%R0.I`,
-  `%MW0.3`) included — with a migration chain from v1.
+There are no display servers in CI, so the interface is reviewed with headless screenshots
+(`cargo test -p softladder-ui --test ui_shots` → `target/ui-shots/`).
 
 | Milestone | Scope |
 | --- | --- |
@@ -71,7 +70,7 @@ rebuilds everything around it:
 | M1 ✅ | Core: variable accessors, expressions, function blocks, real power flow, diagnostics |
 | M2 ✅ | egui editor: element palette, undo/redo, simulation bench, problems, live power flow |
 | M3 ✅ | ClassicLadder import/export + golden-corpus round trip |
-| M4 | SFC/Grafcet model, engine and editor |
+| M4 | SFC/Grafcet: engine and `sequential.csv` interoperability done; editor in progress |
 | M5 | IO: simulator scripting, Modbus TCP master/slave, then RTU |
 | M6 | Online monitor, web dashboard, alarms and journal |
 | M7 | Physical IO (GPIO) + LinuxCNC HAL bridge |
