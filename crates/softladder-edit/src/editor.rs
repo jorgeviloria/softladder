@@ -387,6 +387,7 @@ impl Editor {
             language,
             subroutine: None,
             rungs: Vec::new(),
+            sequential_page: None,
         };
         self.apply(Command::AddSection { section })?;
         Ok(id)

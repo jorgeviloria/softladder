@@ -15,8 +15,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use softladder_core::model::WireMode;
 use softladder_core::{
-    CounterKind, Diagnostic, ElementKind, PlacedElement, Project, Rung, Section, SectionLanguage,
-    Severity, Symbol, VarKind, VarRef,
+    CounterKind, Diagnostic, ElementKind, Expr, PlacedElement, Project, Rung, Section,
+    SectionLanguage, SequentialPage, Severity, Step, Symbol, Transition, VarKind, VarRef,
 };
 
 use super::document::Document;
@@ -57,6 +57,16 @@ const MIN_SYMBOLS: usize = 300;
 const MIN_PHYS_WORDS_INPUTS: u32 = 25;
 /// Reference minimum for `SIZE_NBR_PHYS_WORDS_OUTPUTS`.
 const MIN_PHYS_WORDS_OUTPUTS: u32 = 25;
+
+/// `NBR_SWITCHS_MAX`: steps a transition can activate or deactivate.
+const MAX_SWITCHES: usize = 10;
+
+/// `NBR_SEQUENTIAL_PAGES`: sequential pages the reference array holds.
+const MAX_SEQUENTIAL_PAGES: u32 = 5;
+/// `NBR_STEPS`: steps the reference array holds.
+const MAX_SEQUENTIAL_STEPS: usize = 128;
+/// `NBR_TRANSITIONS`: transitions the reference array holds.
+const MAX_SEQUENTIAL_TRANSITIONS: usize = 256;
 
 /// Part names that keep their reference position in the exported container.
 ///
@@ -174,6 +184,7 @@ impl<'a> Exporter<'a> {
                 self.expressions_csv(),
             ),
             ("sections.csv".to_owned(), self.sections_csv()),
+            ("sequential.csv".to_owned(), self.sequential_csv()),
             ("symbols.csv".to_owned(), self.symbols_csv()),
         ];
         let project = self.project;
@@ -688,24 +699,277 @@ impl<'a> Exporter<'a> {
         for section in &project.sections {
             let language = match section.language {
                 SectionLanguage::Ladder => 0,
-                SectionLanguage::Sfc => {
-                    self.warn(format!(
-                        "sections.csv: section {} is a sequential (SFC) section; its steps and \
-                         transitions are not exported",
-                        section.id
-                    ));
-                    1
-                }
+                SectionLanguage::Sfc => 1,
             };
             let subroutine = section.subroutine.map_or(-1, i64::from);
             let first = section.rungs.first().map_or(0, |id| i64::from(*id));
             let last = section.rungs.last().map_or(0, |id| i64::from(*id));
+            let page = match section.sequential_page.as_ref() {
+                Some(page) => i64::from(page.number),
+                None => {
+                    if section.language == SectionLanguage::Sfc {
+                        self.warn(format!(
+                            "sections.csv: section {} is a sequential (SFC) section with no page; \
+                             it exports as an empty sequential section",
+                            section.id
+                        ));
+                    }
+                    0
+                }
+            };
             text.push_str(&format!(
-                "{:03},{language},{subroutine},{first},{last},0\n",
+                "{:03},{language},{subroutine},{first},{last},{page}\n",
                 section.id
             ));
         }
         text
+    }
+
+    /// Renders `sequential.csv`.
+    ///
+    /// ClassicLadder keeps one global array of steps and one of transitions and
+    /// addresses them by *slot*: the `S<n>,…` / `T<n>,…` records carry that slot
+    /// as their number, and a transition names the slots of the steps it
+    /// activates and deactivates. SoftLadder numbers the steps the way the user
+    /// sees them (`%X<number>`) and refers to them by that number, so the
+    /// exporter assigns fresh slots — in section order for the steps and in
+    /// ascending transition-number order for the transitions — and writes the
+    /// step numbers in their own field.
+    fn sequential_csv(&mut self) -> String {
+        let project = self.project;
+        let mut pages: Vec<&SequentialPage> = Vec::new();
+        for section in &project.sections {
+            if let Some(page) = section.sequential_page.as_ref() {
+                pages.push(page);
+            }
+        }
+
+        // Step slots, and the number -> slot map the transitions need.
+        let mut step_records: Vec<(u32, &Step, &SequentialPage)> = Vec::new();
+        let mut number_slot: BTreeMap<u32, u32> = BTreeMap::new();
+        for page in &pages {
+            for step in &page.steps {
+                let slot = u32::try_from(step_records.len()).unwrap_or(u32::MAX);
+                if number_slot.insert(step.number, slot).is_some() {
+                    self.warn(format!(
+                        "sequential.csv: step number {} is used by more than one step; the first \
+                         slot wins",
+                        step.number
+                    ));
+                }
+                step_records.push((slot, step, page));
+            }
+        }
+
+        // Transitions, in ascending number order, which is the order the
+        // importer renumbers them in.
+        let mut transitions: Vec<(&SequentialPage, &Transition)> = Vec::new();
+        for page in &pages {
+            for transition in &page.transitions {
+                transitions.push((page, transition));
+            }
+        }
+        transitions.sort_by_key(|(_, transition)| transition.number);
+        for pair in transitions.windows(2) {
+            if let [first, second] = pair {
+                if first.1.number == second.1.number {
+                    self.warn(format!(
+                        "sequential.csv: transition number {} is used twice; both are exported",
+                        first.1.number
+                    ));
+                }
+            }
+        }
+
+        // The reference's sequential arrays are fixed and small; SoftLadder is
+        // unbounded, so anything outside them is written and reported.
+        for page in &pages {
+            if page.number >= MAX_SEQUENTIAL_PAGES {
+                self.warn(format!(
+                    "sequential.csv: page {} is outside the reference's {MAX_SEQUENTIAL_PAGES} \
+                     sequential pages; it was still written",
+                    page.number
+                ));
+            }
+        }
+        if step_records.len() > MAX_SEQUENTIAL_STEPS {
+            self.warn(format!(
+                "sequential.csv: {} steps exceed the reference's {MAX_SEQUENTIAL_STEPS}; the extra \
+                 ones were still written",
+                step_records.len()
+            ));
+        }
+        if transitions.len() > MAX_SEQUENTIAL_TRANSITIONS {
+            self.warn(format!(
+                "sequential.csv: {} transitions exceed the reference's \
+                 {MAX_SEQUENTIAL_TRANSITIONS}; the extra ones were still written",
+                transitions.len()
+            ));
+        }
+
+        let mut text = String::from("#VER=1.0\n");
+        for page in &pages {
+            if page.comment.is_empty() {
+                continue;
+            }
+            let comment = one_line(&page.comment);
+            if comment != page.comment {
+                self.warn(format!(
+                    "sequential.csv: the comment of page {} contains a line break; it was flattened",
+                    page.number
+                ));
+            }
+            text.push_str(&format!("P{},{comment}\n", page.number));
+        }
+        for (slot, step, page) in &step_records {
+            if step.page != page.number {
+                self.warn(format!(
+                    "sequential.csv: step {} records page {} but is listed under page {}; the \
+                     containing page wins",
+                    step.number, step.page, page.number
+                ));
+            }
+            let (x, y) = (
+                self.axis(step.x, "step", step.number),
+                self.axis(step.y, "step", step.number),
+            );
+            text.push_str(&format!(
+                "S{slot},{},{},{},{x},{y}\n",
+                u8::from(step.is_initial),
+                step.number,
+                page.number
+            ));
+        }
+        for (position, (page, transition)) in transitions.iter().enumerate() {
+            let slot = u32::try_from(position).unwrap_or(u32::MAX);
+            let mut fields: Vec<i64> = Vec::new();
+            self.push_slots(
+                &mut fields,
+                &transition.to,
+                &number_slot,
+                "activating",
+                transition.number,
+            );
+            self.push_slots(
+                &mut fields,
+                &transition.from,
+                &number_slot,
+                "deactivating",
+                transition.number,
+            );
+            while fields.len() < 4 * MAX_SWITCHES {
+                fields.push(-1);
+            }
+            if transition.page != page.number {
+                self.warn(format!(
+                    "sequential.csv: transition {} records page {} but is listed under page {}; the \
+                     containing page wins",
+                    transition.number, transition.page, page.number
+                ));
+            }
+            let (x, y) = (
+                self.axis(transition.x, "transition", transition.number),
+                self.axis(transition.y, "transition", transition.number),
+            );
+            let page_number = page.number;
+            text.push_str(&format!(
+                "T{slot},{},{page_number},{x},{y}\n",
+                fields
+                    .iter()
+                    .map(i64::to_string)
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+        for (position, (_, transition)) in transitions.iter().enumerate() {
+            let slot = u32::try_from(position).unwrap_or(u32::MAX);
+            let (var_type, var_num) = self.encode_condition(transition);
+            text.push_str(&format!("C{slot},0,{var_type}/{var_num}\n"));
+        }
+        text
+    }
+
+    /// Appends the slots of `numbers` to `fields`, padding to ten entries.
+    fn push_slots(
+        &mut self,
+        fields: &mut Vec<i64>,
+        numbers: &[u32],
+        number_slot: &BTreeMap<u32, u32>,
+        role: &str,
+        transition: u32,
+    ) {
+        let start = fields.len();
+        for number in numbers.iter().take(MAX_SWITCHES) {
+            match number_slot.get(number) {
+                Some(slot) => fields.push(i64::from(*slot)),
+                None => self.warn(format!(
+                    "sequential.csv: transition {transition} {role} step {number}, which is not on \
+                     any page; the target was dropped"
+                )),
+            }
+        }
+        if numbers.len() > MAX_SWITCHES {
+            self.warn(format!(
+                "sequential.csv: transition {transition} {role} more than {MAX_SWITCHES} steps; the \
+                 extra targets were dropped"
+            ));
+        }
+        while fields.len() - start < MAX_SWITCHES {
+            fields.push(-1);
+        }
+    }
+
+    /// ClassicLadder's `(VarType, VarNum)` pair for a transition condition.
+    ///
+    /// The reference can only test one variable; anything else is reported and
+    /// exported as `%M0`.
+    fn encode_condition(&mut self, transition: &Transition) -> (i64, i64) {
+        let Some(condition) = transition.condition.as_ref() else {
+            self.warn(format!(
+                "sequential.csv: transition {} has no condition, which ClassicLadder cannot express; \
+                 `%M0` was written",
+                transition.number
+            ));
+            return (mapping::VAR_MEM_BIT, 0);
+        };
+        let Expr::Var(var) = condition else {
+            self.warn(format!(
+                "sequential.csv: transition {} tests an expression, which ClassicLadder cannot \
+                 express; `%M0` was written",
+                transition.number
+            ));
+            return (mapping::VAR_MEM_BIT, 0);
+        };
+        match encode_var(var) {
+            Ok(encoded) => {
+                if encoded.indexed.is_some() {
+                    self.warn(format!(
+                        "sequential.csv: transition {} tests an indexed variable, which the \
+                         condition field cannot express; the plain variable was written",
+                        transition.number
+                    ));
+                }
+                (encoded.var_type, encoded.var_num)
+            }
+            Err(reason) => {
+                self.warn(format!(
+                    "sequential.csv: transition {}: {reason}; `%M0` was written",
+                    transition.number
+                ));
+                (mapping::VAR_MEM_BIT, 0)
+            }
+        }
+    }
+
+    /// Clamps a page coordinate into the reference's signed-byte range.
+    fn axis(&mut self, value: i32, what: &str, number: u32) -> i64 {
+        if !(-128..=127).contains(&value) {
+            self.warn(format!(
+                "sequential.csv: {what} {number} is placed at {value}, outside the reference's \
+                 -128..127 range; it was clamped"
+            ));
+        }
+        i64::from(value.clamp(-128, 127))
     }
 
     /// Renders `symbols.csv`.

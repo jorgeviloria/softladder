@@ -32,17 +32,23 @@
 //!   `s`/`m` suffix means one second / one minute per unit, and an unsuffixed
 //!   variable is interpreted as milliseconds.
 //! * A coil's output is its input, which makes serial coils behave as expected.
+//! * A sequential section evaluates its transitions once, against the step
+//!   state at the start of the section, where ClassicLadder repeats the page up
+//!   to fifty times. A chain of transitions therefore advances by one step per
+//!   scan instead of firing through in one. `%X<n>.V` is counted in
+//!   milliseconds, where ClassicLadder writes whole seconds.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
 use crate::diag::{Diagnostic, Severity};
-use crate::expr::{eval, parse, Value, VarSource};
+use crate::expr::{eval, parse, Expr, Value, VarSource};
 use crate::model::{
     CounterKind, ElementKind, PlacedElement, Project, RegisterMode, Rung, Section, SectionLanguage,
     TimerMode, WireMode,
 };
+use crate::sfc::{SequentialPage, Transition};
 use crate::vars::{Accessor, VarKind, VarRef};
 
 /// Default number of internal bit memories (`%M`).
@@ -1197,6 +1203,34 @@ fn clamp_u64_to_i32(value: u64) -> i32 {
     value.min(i32::MAX as u64) as i32
 }
 
+/// The `%X<number>.A` activity bit of an SFC step.
+fn step_activity(number: u32) -> VarRef {
+    VarRef::new(VarKind::Step, number)
+}
+
+/// The `%X<number>.V` elapsed-time word of an SFC step.
+fn step_elapsed(number: u32) -> VarRef {
+    VarRef::new(VarKind::Step, number).with_accessor(Accessor::Value)
+}
+
+/// Appends every variable an expression reads.
+fn collect_expr_vars(expr: &Expr, out: &mut Vec<VarRef>) {
+    match expr {
+        Expr::Lit(_) => {}
+        Expr::Var(var) => out.push(var.clone()),
+        Expr::Unary(_, inner) => collect_expr_vars(inner, out),
+        Expr::Binary(_, lhs, rhs) => {
+            collect_expr_vars(lhs, out);
+            collect_expr_vars(rhs, out);
+        }
+        Expr::Call(_, arguments) => {
+            for argument in arguments {
+                collect_expr_vars(argument, out);
+            }
+        }
+    }
+}
+
 /// Result of a single scan.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ScanReport {
@@ -1283,25 +1317,86 @@ impl ScanEngine {
         &self.edge_bank
     }
 
-    /// Rebuilds the cell index, the subroutine table and the edge history.
+    /// Rebuilds the cell index and the edge history, ensures every variable the
+    /// project uses exists, and prepares the sequential chart.
     ///
     /// Called by [`ScanEngine::new`] and automatically whenever the project
     /// shape changes; a caller that edits the project through
     /// [`ScanEngine::project_mut`] does not have to call it explicitly.
+    ///
+    /// Preparing the chart is ClassicLadder's *PrepareSequential*: every step is
+    /// deactivated and every initial step is activated, so a project starts in
+    /// its marked start state. `refresh` is therefore also what a caller uses to
+    /// restart the chart after editing it.
     pub fn refresh(&mut self) {
         self.cache = RungCache::build(&self.project);
         self.edge_prev = vec![false; self.cache.element_count];
         self.ensure_used_variables();
+        self.prepare_sequential();
     }
 
     /// Grows the store so that every variable the project uses exists.
     fn ensure_used_variables(&mut self) {
+        for var in self.used_variables() {
+            let _ = self.store.ensure(&var);
+        }
+    }
+
+    /// Every variable the project reads or drives outside a rung cell.
+    ///
+    /// Rung elements carry their variable in the element itself; the sequential
+    /// chart additionally addresses steps (`%X<n>.A`) and reads the variables of
+    /// its transition conditions.
+    fn used_variables(&self) -> Vec<VarRef> {
+        let mut vars = Vec::new();
         for rung in &self.project.rungs {
             for element in &rung.elements {
-                if let Some(var) = element.var.clone() {
-                    let _ = self.store.ensure(&var);
+                if let Some(var) = element.var.as_ref() {
+                    vars.push(var.clone());
                 }
             }
+        }
+        for section in &self.project.sections {
+            let Some(page) = section.sequential_page.as_ref() else {
+                continue;
+            };
+            for step in &page.steps {
+                vars.push(step_activity(step.number));
+            }
+            for transition in &page.transitions {
+                for number in transition.from.iter().chain(transition.to.iter()) {
+                    vars.push(step_activity(*number));
+                }
+                if let Some(condition) = transition.condition.as_ref() {
+                    collect_expr_vars(condition, &mut vars);
+                }
+            }
+        }
+        vars
+    }
+
+    /// ClassicLadder's *PrepareSequential*: resets every step and activates the
+    /// initial ones.
+    fn prepare_sequential(&mut self) {
+        for step in &mut self.store.steps {
+            *step = false;
+        }
+        for age in &mut self.store.step_ages {
+            *age = 0;
+        }
+        let mut initial: Vec<u32> = Vec::new();
+        for section in &self.project.sections {
+            let Some(page) = section.sequential_page.as_ref() else {
+                continue;
+            };
+            for step in &page.steps {
+                if step.is_initial {
+                    initial.push(step.number);
+                }
+            }
+        }
+        for number in initial {
+            let _ = self.store.set(&step_activity(number), Value::Bit(true));
         }
     }
 
@@ -1366,10 +1461,9 @@ impl ScanEngine {
                 SectionLanguage::Sfc => {
                     machine.section_index = index;
                     machine.rung_index = 0;
-                    machine.error(
-                        "SL-W002",
-                        format!("SFC section `{}` is skipped until M4", section.name),
-                    );
+                    if section.subroutine.is_none() && !machine.mad_loop {
+                        machine.run_sequential_section(section);
+                    }
                 }
             }
         }
@@ -1455,6 +1549,10 @@ impl Machine<'_> {
     /// Returns `true` when the whole scan must stop because of the mad-loop
     /// guard.
     fn run_section(&mut self, project: &Project, section_index: usize) -> bool {
+        // Every diagnostic this section (or a subroutine it calls) raises is
+        // attributed to the section it came from; `take_call` saves and
+        // restores the caller's index around the recursive run.
+        self.section_index = section_index;
         let Some(section) = project.sections.get(section_index) else {
             return false;
         };
@@ -1475,6 +1573,153 @@ impl Machine<'_> {
             }
         }
         self.mad_loop
+    }
+
+    /// Runs one sequential (SFC) section.
+    ///
+    /// This is ClassicLadder's evolution rule, applied **once** per section
+    /// instead of repeating the page until it settles: every transition is
+    /// evaluated against the step state at the start of the section, the
+    /// transitions that fire are applied together — the steps they deactivate
+    /// are cleared first, then the steps they activate are set — and the step
+    /// ages are updated last.
+    ///
+    /// Evaluating every transition against the same snapshot is what keeps a
+    /// chain of transitions from firing through in a single scan. The cost of
+    /// the difference is that ClassicLadder's `RefreshSequentialPage`, which
+    /// repeats a page up to fifty times, advances such a chain by one
+    /// transition per scan under SoftLadder.
+    fn run_sequential_section(&mut self, section: &Section) {
+        let Some(page) = section.sequential_page.as_ref() else {
+            self.report(
+                Severity::Warning,
+                "SL-W002",
+                format!(
+                    "SFC section `{}` has no page, so there is nothing to run",
+                    section.name
+                ),
+            );
+            return;
+        };
+        let mut clear: Vec<u32> = Vec::new();
+        let mut set: Vec<u32> = Vec::new();
+        for transition in &page.transitions {
+            if !self.transition_fires(page, transition) {
+                continue;
+            }
+            for number in &transition.from {
+                if !clear.contains(number) {
+                    clear.push(*number);
+                }
+            }
+            for number in &transition.to {
+                if page.step(*number).is_none() {
+                    self.report(
+                        Severity::Warning,
+                        "SL-W002",
+                        format!(
+                            "SFC page {} transition {}: target step {number} is not on the page, \
+                             so it cannot be activated",
+                            page.number, transition.number
+                        ),
+                    );
+                    continue;
+                }
+                if !set.contains(number) {
+                    set.push(*number);
+                }
+            }
+        }
+        // Clear first, then set: a step that one transition deactivates while
+        // another activates it ends the scan active, which is what the
+        // simultaneous interpretation of the chart requires.
+        for number in &clear {
+            let _ = self.store.set(&step_activity(*number), Value::Bit(false));
+        }
+        for number in &set {
+            let _ = self.store.set(&step_activity(*number), Value::Bit(true));
+        }
+        self.update_step_ages(page);
+    }
+
+    /// `true` when `transition` fires in `page`.
+    ///
+    /// A transition fires when its condition holds **and** every step it
+    /// deactivates is active. A step the page does not define can never be
+    /// active, so such a transition never fires; that is reported once per
+    /// scan with the page and the step.
+    fn transition_fires(&mut self, page: &SequentialPage, transition: &Transition) -> bool {
+        let holds = match transition.condition.as_ref() {
+            None => true,
+            Some(condition) => match condition.eval(self.store) {
+                Ok(value) => value.as_bool(),
+                Err(error) => {
+                    self.error(
+                        "SL-E002",
+                        format!(
+                            "SFC page {} transition {}: cannot evaluate the condition: {error}",
+                            page.number, transition.number
+                        ),
+                    );
+                    false
+                }
+            },
+        };
+        if !holds {
+            return false;
+        }
+        for number in &transition.from {
+            if page.step(*number).is_none() {
+                self.report(
+                    Severity::Warning,
+                    "SL-W002",
+                    format!(
+                        "SFC page {} transition {}: source step {number} is not on the page, so \
+                         the transition can never fire",
+                        page.number, transition.number
+                    ),
+                );
+                return false;
+            }
+            if !self.step_is_active(*number) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// The `%X<number>.A` activity bit of a step.
+    fn step_is_active(&self, number: u32) -> bool {
+        self.store
+            .get(&step_activity(number))
+            .is_some_and(|value| value.as_bool())
+    }
+
+    /// Publishes every step's activity and elapsed time.
+    ///
+    /// An active step keeps its elapsed time and adds this scan's `delta_ms`;
+    /// an inactive one restarts from zero. `%X<n>.V` is counted in
+    /// milliseconds (ClassicLadder writes whole seconds), matching
+    /// [`VarStore::step_ages`].
+    fn update_step_ages(&mut self, page: &SequentialPage) {
+        for step in &page.steps {
+            let active = self.step_is_active(step.number);
+            let age = if active {
+                self.store
+                    .get(&step_elapsed(step.number))
+                    .map_or(0, |value| value.as_i64().max(0) as u64)
+                    .saturating_add(self.delta_ms)
+            } else {
+                0
+            };
+            let _ = self.store.set(
+                &step_elapsed(step.number),
+                Value::Word(clamp_u64_to_i32(age)),
+            );
+            let _ = self
+                .store
+                .set(&step_activity(step.number), Value::Bit(active));
+        }
     }
 
     /// Runs the rung at `position` inside `section`.
@@ -2383,14 +2628,30 @@ struct Shape {
     sections: usize,
     rungs: usize,
     elements: usize,
+    /// Steps and transitions of every sequential page; a chart edit does not
+    /// change any of the counts above, so it needs its own.
+    steps: usize,
+    transitions: usize,
 }
 
 /// Computes the [`Shape`] of a project.
 fn shape_of(project: &Project) -> Shape {
+    let mut steps = 0usize;
+    let mut transitions = 0usize;
+    for page in project
+        .sections
+        .iter()
+        .filter_map(|section| section.sequential_page.as_ref())
+    {
+        steps += page.steps.len();
+        transitions += page.transitions.len();
+    }
     Shape {
         sections: project.sections.len(),
         rungs: project.rungs.len(),
         elements: project.rungs.iter().map(|rung| rung.elements.len()).sum(),
+        steps,
+        transitions,
     }
 }
 
@@ -2554,13 +2815,18 @@ fn resolve_jump(project: &Project, section: &Section, parameter: &str) -> Option
 /// * `SL-E007` — a `CoilCall` to a section that is not a subroutine,
 /// * `SL-E004` — an element missing its required variable,
 /// * `SL-E003` — an element/variable kind mismatch,
+/// * `SL-E011` — an SFC transition naming a step the page does not define, or a
+///   step or transition recorded on another page,
 /// * `SL-W001` — a live row with no element in column 0, i.e. no path to the
-///   left rail,
-/// * `SL-W002` — an SFC section, which the engine skips until M4.
+///   left rail, or an SFC step no transition can activate,
+/// * `SL-W002` — an SFC section with no page,
+/// * `SL-W011` — an SFC transition with no condition, i.e. one that fires
+///   whenever its source steps are active.
 ///
 /// Diagnostics carry the section and rung indices. Out-of-range variable
 /// indices are *not* reported here because a store may legitimately be grown on
 /// demand; the scan reports them as `SL-E003` when they cannot be addressed.
+/// SFC diagnostics name the page and the step or transition in their message.
 pub fn lint(project: &Project) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let subroutines: Vec<u32> = project
@@ -2571,14 +2837,7 @@ pub fn lint(project: &Project) -> Vec<Diagnostic> {
 
     for (index, section) in project.sections.iter().enumerate() {
         if section.language == SectionLanguage::Sfc {
-            diagnostics.push(
-                Diagnostic::new(
-                    Severity::Warning,
-                    "SL-W002",
-                    format!("SFC section `{}` is skipped until M4", section.name),
-                )
-                .with_section(index),
-            );
+            lint_sequential(section, index, &mut diagnostics);
         }
         for (position, rung_id) in section.rungs.iter().enumerate() {
             let Some(rung) = project.rung(*rung_id) else {
@@ -2653,6 +2912,110 @@ pub fn lint(project: &Project) -> Vec<Diagnostic> {
     }
 
     diagnostics
+}
+
+/// Structural checks of one sequential (SFC) section.
+///
+/// Every step and transition of a page is checked against the page that holds
+/// it: SoftLadder pages are self-contained, where ClassicLadder keeps one
+/// global step array shared by all pages. A transition that names a step the
+/// page does not define therefore cannot fire, and is reported.
+fn lint_sequential(section: &Section, index: usize, diagnostics: &mut Vec<Diagnostic>) {
+    let Some(page) = section.sequential_page.as_ref() else {
+        diagnostics.push(
+            Diagnostic::new(
+                Severity::Warning,
+                "SL-W002",
+                format!("SFC section `{}` has no page", section.name),
+            )
+            .with_section(index),
+        );
+        return;
+    };
+
+    for step in &page.steps {
+        if step.page != page.number {
+            diagnostics.push(
+                Diagnostic::new(
+                    Severity::Error,
+                    "SL-E011",
+                    format!(
+                        "SFC section `{}` page {}: step {} records page {} but is listed under \
+                         page {}",
+                        section.name, page.number, step.number, step.page, page.number
+                    ),
+                )
+                .with_section(index),
+            );
+        }
+        let activated = page
+            .transitions
+            .iter()
+            .any(|transition| transition.to.contains(&step.number));
+        if !activated && !step.is_initial {
+            diagnostics.push(
+                Diagnostic::new(
+                    Severity::Warning,
+                    "SL-W001",
+                    format!(
+                        "SFC section `{}` page {}: step {} is referenced by no transition and can \
+                         never be activated",
+                        section.name, page.number, step.number
+                    ),
+                )
+                .with_section(index),
+            );
+        }
+    }
+
+    for transition in &page.transitions {
+        if transition.page != page.number {
+            diagnostics.push(
+                Diagnostic::new(
+                    Severity::Error,
+                    "SL-E011",
+                    format!(
+                        "SFC section `{}` page {}: transition {} records page {} but is listed \
+                         under page {}",
+                        section.name, page.number, transition.number, transition.page, page.number
+                    ),
+                )
+                .with_section(index),
+            );
+        }
+        if transition.condition.is_none() {
+            diagnostics.push(
+                Diagnostic::new(
+                    Severity::Warning,
+                    "SL-W011",
+                    format!(
+                        "SFC section `{}` page {} transition {}: no condition, so it fires \
+                         whenever its source steps are active",
+                        section.name, page.number, transition.number
+                    ),
+                )
+                .with_section(index),
+            );
+        }
+        for (role, numbers) in [("source", &transition.from), ("target", &transition.to)] {
+            for number in numbers {
+                if page.step(*number).is_none() {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            Severity::Error,
+                            "SL-E011",
+                            format!(
+                                "SFC section `{}` page {} transition {}: {role} step {number} does \
+                                 not exist",
+                                section.name, page.number, transition.number
+                            ),
+                        )
+                        .with_section(index),
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Attaches section and rung context to a diagnostic.
@@ -4429,7 +4792,7 @@ mod tests {
     }
 
     #[test]
-    fn sfc_sections_are_skipped_with_a_warning() {
+    fn an_sfc_section_without_a_page_cannot_run() {
         let sfc = Section {
             language: SectionLanguage::Sfc,
             rungs: vec![1],
@@ -4447,8 +4810,335 @@ mod tests {
         ));
         set_bit(&mut engine, "%M0", true);
         let report = engine.scan_once(0);
-        assert!(has(&report, "SL-W002"));
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "SL-W002"
+                    && diagnostic.severity == Severity::Warning),
+            "an SFC section without a page is skipped with a warning: {:?}",
+            codes(&report)
+        );
         assert_eq!(get(&engine, "%Q0"), Some(Value::Bit(false)));
+    }
+
+    // ---------------------------------------------------------------------
+    // Sequential Function Chart
+    // ---------------------------------------------------------------------
+
+    /// A step of the chart, on page 0.
+    fn sfc_step(number: u32, is_initial: bool) -> crate::sfc::Step {
+        crate::sfc::Step {
+            number,
+            is_initial,
+            page: 0,
+            ..crate::sfc::Step::default()
+        }
+    }
+
+    /// A transition of the chart, on page 0.
+    fn sfc_transition(
+        number: u32,
+        condition: Option<&str>,
+        from: &[u32],
+        to: &[u32],
+    ) -> Transition {
+        Transition {
+            number,
+            condition: condition.map(|text| text.parse::<Expr>().expect("condition parses")),
+            from: from.to_vec(),
+            to: to.to_vec(),
+            page: 0,
+            ..Transition::default()
+        }
+    }
+
+    /// A one-section project running `page`.
+    fn sfc_engine(page: SequentialPage) -> ScanEngine {
+        ScanEngine::new(project(vec![Section::sfc(0, "Chart", page)], Vec::new()))
+    }
+
+    /// `%X<number>.A`.
+    fn step_active(engine: &ScanEngine, number: u32) -> bool {
+        get(engine, &format!("%X{number}.A")) == Some(Value::Bit(true))
+    }
+
+    #[test]
+    fn a_sequence_advances_one_step_per_scan() {
+        let mut page = SequentialPage::new(0, "demo");
+        page.steps = vec![sfc_step(0, true), sfc_step(1, false), sfc_step(2, false)];
+        page.transitions = vec![
+            sfc_transition(0, Some("%M0"), &[0], &[1]),
+            sfc_transition(1, Some("%M1"), &[1], &[2]),
+        ];
+        let mut engine = sfc_engine(page);
+
+        // The initial step is active before the first scan ever runs.
+        assert!(step_active(&engine, 0));
+        assert!(!step_active(&engine, 1));
+
+        // A false condition leaves the sequence where it is.
+        let report = engine.scan_once(0);
+        assert!(!has(&report, "SL-E002"), "{:?}", codes(&report));
+        assert!(step_active(&engine, 0));
+        assert!(!step_active(&engine, 1));
+
+        // A true condition clears the source and sets the target.
+        set_bit(&mut engine, "%M0", true);
+        engine.scan_once(10);
+        assert!(!step_active(&engine, 0));
+        assert!(step_active(&engine, 1));
+        assert!(!step_active(&engine, 2));
+
+        // The second transition only fires once its own source is active.
+        set_bit(&mut engine, "%M1", true);
+        engine.scan_once(20);
+        assert!(!step_active(&engine, 1));
+        assert!(step_active(&engine, 2));
+    }
+
+    #[test]
+    fn an_init_step_is_active_from_construction() {
+        let mut page = SequentialPage::new(0, "demo");
+        page.steps = vec![sfc_step(0, true), sfc_step(1, true), sfc_step(2, false)];
+        let engine = sfc_engine(page);
+        assert!(step_active(&engine, 0));
+        assert!(step_active(&engine, 1));
+        assert!(!step_active(&engine, 2));
+        assert_eq!(get(&engine, "%X0.V"), Some(Value::Word(0)));
+    }
+
+    #[test]
+    fn an_and_divergence_activates_every_target_at_once() {
+        let mut page = SequentialPage::new(0, "demo");
+        page.steps = vec![sfc_step(0, true), sfc_step(1, false), sfc_step(2, false)];
+        page.transitions = vec![sfc_transition(0, Some("%M0"), &[0], &[1, 2])];
+        let mut engine = sfc_engine(page);
+        set_bit(&mut engine, "%M0", true);
+        engine.scan_once(0);
+        assert!(!step_active(&engine, 0));
+        assert!(step_active(&engine, 1));
+        assert!(step_active(&engine, 2));
+    }
+
+    #[test]
+    fn an_and_convergence_requires_every_source_step() {
+        // Both sources initial: the convergence fires.
+        let mut page = SequentialPage::new(0, "demo");
+        page.steps = vec![sfc_step(0, true), sfc_step(1, true), sfc_step(2, false)];
+        page.transitions = vec![sfc_transition(0, Some("%M0"), &[0, 1], &[2])];
+        let mut engine = sfc_engine(page);
+        set_bit(&mut engine, "%M0", true);
+        engine.scan_once(0);
+        assert!(step_active(&engine, 2));
+
+        // One source never becomes active: the convergence cannot fire.
+        let mut page = SequentialPage::new(0, "demo");
+        page.steps = vec![sfc_step(0, true), sfc_step(1, false), sfc_step(2, false)];
+        page.transitions = vec![sfc_transition(0, Some("%M0"), &[0, 1], &[2])];
+        let mut engine = sfc_engine(page);
+        set_bit(&mut engine, "%M0", true);
+        engine.scan_once(0);
+        assert!(step_active(&engine, 0));
+        assert!(!step_active(&engine, 2));
+    }
+
+    #[test]
+    fn an_or_divergence_takes_the_branch_whose_condition_holds() {
+        let mut page = SequentialPage::new(0, "demo");
+        page.steps = vec![sfc_step(0, true), sfc_step(1, false), sfc_step(2, false)];
+        page.transitions = vec![
+            sfc_transition(0, Some("%M0"), &[0], &[1]),
+            sfc_transition(1, Some("%M1"), &[0], &[2]),
+        ];
+
+        let mut first = sfc_engine(page.clone());
+        set_bit(&mut first, "%M0", true);
+        first.scan_once(0);
+        assert!(!step_active(&first, 0));
+        assert!(step_active(&first, 1));
+        assert!(!step_active(&first, 2));
+
+        let mut second = sfc_engine(page);
+        set_bit(&mut second, "%M1", true);
+        second.scan_once(0);
+        assert!(!step_active(&second, 0));
+        assert!(!step_active(&second, 1));
+        assert!(step_active(&second, 2));
+    }
+
+    #[test]
+    fn a_chain_of_transitions_does_not_fire_through_in_one_scan() {
+        let mut page = SequentialPage::new(0, "demo");
+        page.steps = vec![sfc_step(0, true), sfc_step(1, false), sfc_step(2, false)];
+        page.transitions = vec![
+            sfc_transition(0, Some("%M0"), &[0], &[1]),
+            sfc_transition(1, Some("%M1"), &[1], &[2]),
+        ];
+        let mut engine = sfc_engine(page);
+        set_bit(&mut engine, "%M0", true);
+        set_bit(&mut engine, "%M1", true);
+
+        engine.scan_once(0);
+        assert!(
+            step_active(&engine, 1) && !step_active(&engine, 2),
+            "the second transition must not see the step the first one just set"
+        );
+
+        engine.scan_once(10);
+        assert!(!step_active(&engine, 1));
+        assert!(step_active(&engine, 2));
+    }
+
+    #[test]
+    fn step_elapsed_time_is_published_in_milliseconds() {
+        let mut page = SequentialPage::new(0, "demo");
+        page.steps = vec![sfc_step(0, true), sfc_step(1, false)];
+        page.transitions = vec![sfc_transition(0, Some("%M0"), &[0], &[1])];
+        let mut engine = sfc_engine(page);
+
+        engine.scan_once(0);
+        assert_eq!(get(&engine, "%X0.V"), Some(Value::Word(0)));
+
+        engine.scan_once(100);
+        engine.scan_once(250);
+        assert_eq!(get(&engine, "%X0.V"), Some(Value::Word(250)));
+
+        // Activating a step restarts its clock; the delta of the scan that set
+        // it is already counted, exactly like ClassicLadder's page refresh.
+        set_bit(&mut engine, "%M0", true);
+        engine.scan_once(300);
+        assert!(step_active(&engine, 1));
+        assert_eq!(get(&engine, "%X0.V"), Some(Value::Word(0)));
+        assert_eq!(get(&engine, "%X1.V"), Some(Value::Word(50)));
+
+        engine.scan_once(301);
+        assert_eq!(get(&engine, "%X1.V"), Some(Value::Word(51)));
+    }
+
+    #[test]
+    fn a_transition_source_outside_the_page_is_reported() {
+        let mut page = SequentialPage::new(0, "demo");
+        page.steps = vec![sfc_step(0, true), sfc_step(1, false)];
+        page.transitions = vec![sfc_transition(0, None, &[99], &[1])];
+        let mut engine = sfc_engine(page);
+        let report = engine.scan_once(0);
+        assert!(has(&report, "SL-W002"));
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("99")),
+            "{:?}",
+            codes(&report)
+        );
+        assert!(!step_active(&engine, 1));
+    }
+
+    #[test]
+    fn two_engines_with_the_same_inputs_stay_identical() {
+        let mut page = SequentialPage::new(0, "demo");
+        page.steps = vec![sfc_step(0, true), sfc_step(1, false), sfc_step(2, false)];
+        page.transitions = vec![
+            sfc_transition(0, Some("%M0"), &[0], &[1]),
+            sfc_transition(1, Some("%X1.A"), &[1], &[2]),
+        ];
+
+        let run = || {
+            let mut engine = sfc_engine(page.clone());
+            for (step, now) in [false, true, true].iter().zip([0u64, 10, 20]) {
+                set_bit(&mut engine, "%M0", *step);
+                engine.scan_once(now);
+            }
+            engine
+        };
+        assert_eq!(run().store(), run().store());
+    }
+
+    #[test]
+    fn an_sfc_edit_is_picked_up_on_the_next_scan() {
+        let mut page = SequentialPage::new(0, "demo");
+        page.steps = vec![sfc_step(0, true)];
+        let mut engine = sfc_engine(page);
+
+        {
+            let section = engine
+                .project_mut()
+                .sections
+                .first_mut()
+                .expect("the chart section exists");
+            let page = section
+                .sequential_page
+                .as_mut()
+                .expect("the section still has a page");
+            page.steps.push(sfc_step(1, false));
+            page.transitions
+                .push(sfc_transition(0, Some("%M0"), &[0], &[1]));
+        }
+
+        set_bit(&mut engine, "%M0", true);
+        let report = engine.scan_once(0);
+        assert!(
+            !report
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == Severity::Error),
+            "an edited chart must not raise errors: {:?}",
+            codes(&report)
+        );
+        assert!(!step_active(&engine, 0));
+        assert!(step_active(&engine, 1));
+    }
+
+    #[test]
+    fn lint_reports_sfc_structures() {
+        let no_page = Section {
+            language: SectionLanguage::Sfc,
+            ..Section::new(0, "Empty")
+        };
+        let mut page = SequentialPage::new(0, "chart");
+        let mut stray = sfc_step(3, false);
+        stray.page = 1;
+        page.steps = vec![
+            sfc_step(0, true),
+            sfc_step(1, false),
+            sfc_step(2, false),
+            stray,
+        ];
+        page.transitions = vec![
+            // No condition: always fires.
+            sfc_transition(0, None, &[0], &[1]),
+            // Points at a step the page does not define.
+            sfc_transition(1, Some("%M0"), &[0], &[99]),
+        ];
+        let chart = Section::sfc(1, "Chart", page);
+        let project = project(vec![no_page, chart], Vec::new());
+        let diagnostics = lint(&project);
+        let codes: Vec<&str> = diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code)
+            .collect();
+        assert!(codes.contains(&"SL-W002"), "no page: {codes:?}");
+        assert!(codes.contains(&"SL-W011"), "no condition: {codes:?}");
+        assert!(codes.contains(&"SL-W001"), "unreachable step: {codes:?}");
+        assert!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "SL-E011")
+                .count()
+                >= 2,
+            "the missing target and the stray page are both reported: {codes:?}"
+        );
+        assert!(
+            diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.message.contains("page 0")),
+            "every SFC diagnostic names its page: {:?}",
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.as_str())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

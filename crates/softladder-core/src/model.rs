@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::sfc::SequentialPage;
 use crate::sim::SimulationPanel;
 use crate::vars::VarRef;
 
@@ -266,6 +267,14 @@ pub struct Section {
     pub subroutine: Option<u32>,
     /// Ids of the rungs the section executes, in execution order.
     pub rungs: Vec<u32>,
+    /// Sequential chart of an `Sfc` section, or [`None`] for a ladder section
+    /// and for an SFC section whose page has not been drawn yet.
+    ///
+    /// The field is additive (see `docs/FORMAT.md`): it defaults to [`None`]
+    /// and is omitted from the serialized form when it is `None`, so documents
+    /// written before SFC pages existed keep their exact bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequential_page: Option<SequentialPage>,
 }
 
 impl Section {
@@ -277,6 +286,16 @@ impl Section {
             language: SectionLanguage::Ladder,
             subroutine: None,
             rungs: Vec::new(),
+            sequential_page: None,
+        }
+    }
+
+    /// Creates an SFC section that owns `page`.
+    pub fn sfc(id: u32, name: impl Into<String>, page: SequentialPage) -> Self {
+        Self {
+            language: SectionLanguage::Sfc,
+            sequential_page: Some(page),
+            ..Self::new(id, name)
         }
     }
 }

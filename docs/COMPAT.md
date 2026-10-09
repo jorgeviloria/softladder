@@ -178,6 +178,10 @@ The golden corpus is the 39 projects in the reference repository's `projects_exa
 | Expression length | 50 bytes | unlimited (compiled AST) |
 | Alarm credentials | SMTP user/password stored in the project | never imported; configured outside the project |
 | Monitor protocol | proprietary binary over UDP/serial/modem | JSON/CBOR over TCP/WS; legacy protocol support tracked in [ADR-0006](adr/0006-monitor-protocol.md) |
+| Chart evolution | `RefreshSequentialPage` repeats the page up to 50 times until it settles, so a chain of transitions can fire through in one scan | one snapshot per scan: a chain advances by one transition per scan ([`SEMANTICS.md`](SEMANTICS.md) §4) |
+| Step time | `%X<n>.V` counts whole seconds | milliseconds |
+| Step storage | one global step array shared by every page | pages are self-contained; `%X<n>` is the step's own number |
+| Chart comments | `N` records are part of the page drawing | dropped on import with `SL-W030`; the page and step comments are kept |
 
 ## 8. Format reference
 
@@ -200,7 +204,8 @@ loaders/savers (`files.c`, `files_project.c`, `files_sequential.c`) and against 
 | `registers.csv` | yes | `R<n>,<mode>`; `1` = FIFO, `2` = LIFO, `0` = undefined |
 | `arithmetic_expressions.csv` | yes | `%04d,<expression>` (index zero-padded to four digits) |
 | `timers.csv`, `monostables.csv` | no | deprecated element families; their presets/bases are read so that imported blocks keep their timing, and the parts are passed through |
-| `ioconf.csv`, `modbusioconf.csv`, `com_params.txt`, `modem_config.txt`, `remote_alarms.txt`, `config_events.csv`, `spy_vars.csv`, `sequential.csv` | no | M5/M6/M8 territory; passed through untouched (§8.5) |
+| `sequential.csv` | yes | the SFC charts: pages, steps, transitions and their conditions (§8.4) |
+| `ioconf.csv`, `modbusioconf.csv`, `com_params.txt`, `modem_config.txt`, `remote_alarms.txt`, `config_events.csv`, `spy_vars.csv` | no | M5/M6/M8 territory; passed through untouched (§8.5) |
 
 ### 8.2 Rung file
 
@@ -300,6 +305,24 @@ linked-list walk, not necessarily a contiguous range).
 * Indexed variables become `VarRef::index_expr`; `%W<n>`/`%B<n>` become `%MW<n>`/`%M<n>`.
 * `ELE_OUTPUT_OPERATE` and `ELE_COMPAR` carry the index of an `arithmetic_expressions.csv` entry;
   the expression is copied into `params`.
+* **`sequential.csv`** records, one per line, after a `#VER=` header:
+  * `P<page>,<comment>` — a page comment (written only when it is not empty).
+  * `S<slot>,<init>,<stepNumber>,<page>,<x>,<y>` — a step. `slot` is the array index the transition
+    records refer to; **`stepNumber` is the user's number and is what `%X<n>` addresses**.
+  * `T<slot>,<activate ×10>,<deactivate ×10>,<linkStart ×10>,<linkEnd ×10>,<page>,<x>,<y>` — a
+    transition. The activate/deactivate sets hold step **slots** (`-1` unused): all deactivate steps
+    must be active for it to fire (AND convergence) and the activate steps are set together (AND
+    divergence). The twenty link fields are the editor's OR-bracket drawing and are dropped with
+    `SL-W030`.
+  * `C<slot>,0,<VarType>/<VarNum>` — the transition's condition variable, as the same
+    `(VarType, VarNum)` pair the rung cells use. A transition without a `C` record defaults to
+    `%M0`, matching the reference.
+  * `N<index>,<page>,<x>,<y>,<comment>` — a free comment on the page; not modelled, dropped with
+    `SL-W030`.
+  The importer translates every slot reference into step numbers and numbers transitions densely in
+  slot order, so skipped records still leave `import → export → import` a fixed point; a page no
+  `sections.csv` entry references gets a synthesized SFC section. The reference's capacities (5
+  pages, 128 steps, 256 transitions, 10 targets per direction) are reported as `SL-W033` on export.
 * Timer and counter presets come from `timers_iec.csv` / `counters.csv`. A timer's `params[0]` is a
   duration in **milliseconds** (see `docs/SEMANTICS.md` §3.5), so the importer preserves both the
   value and the recorded base by writing base 2 (100 ms) as `"<preset * 100>"`, base 1 (1 s) as
@@ -338,8 +361,9 @@ Export rebuilds a document the reference implementation can load:
 * Parts that SoftLadder does not model are **passed through unchanged**. The importer therefore
   returns them alongside the project (`Document`), and the exporter takes them back as a template:
   importing and immediately exporting a project preserves every unmodelled part byte for byte.
-* Features with no ClassicLadder equivalent (bit access `%MW0.3`, SFC sections, a bench panel, more
-  than 12 columns) are reported as `SL-W033` and omitted from the exported file.
+* Features with no ClassicLadder equivalent (bit access `%MW0.3`, a bench panel, more than 12
+  columns, a chart bigger than the reference's capacities) are reported as `SL-W033` and omitted
+  from the exported file.
 
 ### 8.6 Diagnostics
 

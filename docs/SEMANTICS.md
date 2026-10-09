@@ -273,7 +273,24 @@ scan_once(now_ms):
 - Main sections run in the order they appear in `Project::sections`.
 - Within a section, rungs run in the order of `Section::rungs`.
 - Subroutine sections never run on their own; they only run from a `CoilCall`.
-- Sections in `SectionLanguage::Sfc` are skipped with `SL-W002` until M4.
+- An SFC section runs once per scan, in `Project::sections` order, immediately where it appears
+  (a subroutine SFC section only when it is called). Every transition of the section's page is
+  evaluated against the **step state at the start of the section**: a transition fires when its
+  condition holds (no condition means always true; a condition that fails to evaluate yields
+  `SL-E002` and counts as false) **and** every step in its `from` set is active. All fired
+  transitions are then applied together — the union of their `from` sets is cleared first, then the
+  union of their `to` sets is set — so a step that one transition deactivates while another
+  activates ends the scan active, and a chain of transitions advances by **one** transition per
+  scan rather than firing through. Each step publishes `%X<n>.A` (activity) and `%X<n>.V` (elapsed
+  milliseconds: an active step adds this scan's clamped `delta_ms`, an inactive one restarts at 0).
+  A transition whose condition error, or a source/target step its page does not define, is reported
+  and cannot fire. `refresh()` resets the chart and activates the initial steps, so a fresh engine —
+  and any structural edit — starts from the marked state.
+
+  **Divergences from the reference:** ClassicLadder repeats a page up to 50 times until it settles,
+  so a chain can fire through in one scan, while SoftLadder advances one transition per scan;
+  ClassicLadder writes `%X<n>.V` in whole seconds, SoftLadder in milliseconds; and ClassicLadder
+  keeps one global step array where SoftLadder's pages are self-contained.
 - An `Error` diagnostic does **not** abort the scan: it is recorded and evaluation continues. Only a
   failed jump or call aborts the current rung, and only the mad-loop guard aborts the section.
 
@@ -293,8 +310,10 @@ reads the clock, the filesystem or the network.
 | `SL-E007` | Error | call to an undefined or non-subroutine section |
 | `SL-E008` | Error | subroutine call stack overflow |
 | `SL-E009` | Error | two elements placed on the same cell |
-| `SL-W001` | Warning | a live row has no path to power (empty column 0 and no vertical link feeding it) |
-| `SL-W002` | Warning | SFC section skipped (engine lands in M4) |
+| `SL-W001` | Warning | a live row has no path to power (empty column 0 and no vertical link feeding it); on a chart, a non-initial step that no transition activates |
+| `SL-W011` | Warning | a rung is empty; on a chart, a transition with no condition (it would always fire) |
+| `SL-E011` | Error | a section references a rung id that does not exist; on a chart, a transition whose source or target step does not exist, or a step/transition recorded on another page |
+| `SL-W002` | Warning | An SFC section has no page, or a transition names a step outside its page |
 
 Diagnostics carry the section id and rung id when available. The runtime surfaces them to the CLI
 (`softladder lint`, exit code 3 when any `Error` is present), the editor Problems panel and the

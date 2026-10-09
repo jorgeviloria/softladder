@@ -76,10 +76,16 @@ for a counter, `E` (empty) for a register.
 
 ## Sequential (SFC)
 
-Steps, transitions, divergences/convergences (AND/OR) and IEC action qualifiers (`N, S, R, L, D, P,
-SD, DS, SL`). The model exists in `softladder-core::sfc`; the engine and editor land in M4, and until
-then the scan engine reports `SL-W002` and skips SFC sections. See
-[`ARCHITECTURE.md`](ARCHITECTURE.md) §6.
+A chart lives in a `SectionLanguage::Sfc` section as a [`SequentialPage`]: a comment, **steps**
+(number, initial flag, position) and **transitions** (an optional condition expression, the steps
+that must all be active for it to fire — an AND convergence — and the steps it activates together —
+an AND divergence). Step activity and elapsed time are published as `%X<n>.A` and `%X<n>.V`.
+
+The engine runs a chart once per scan with the evolution rule of [`SEMANTICS.md`](SEMANTICS.md) §4,
+and `import`/`export` map ClassicLadder's `sequential.csv` (see [`COMPAT.md`](COMPAT.md) §8.4).
+Diagnostics: `SL-W002` (a chart with no page, or a transition naming a step outside its page),
+`SL-W011` (a transition with no condition) and `SL-E011` (a transition whose step does not exist).
+The SFC **editor** is designed in [`UX.md`](UX.md) §12 and lands next.
 
 ## Diagnostics vocabulary
 
@@ -97,12 +103,13 @@ Emitted by the scan engine and `lint`, surfaced in the editor's Problems panel a
 | `SL-E007` | Error | Call to an undefined section, or to one that is not a subroutine |
 | `SL-E008` | Error | Subroutine call stack overflow |
 | `SL-E009` | Error | Two elements placed on the same cell |
-| `SL-E011` | Error | A section references a rung id that does not exist |
+| `SL-E011` | Error | A section references a rung id that does not exist; a chart transition names a step that does not exist |
+| `SL-W011` | Warning | A rung is empty; a chart transition has no condition |
+| `SL-W001` | Warning | A live row cannot reach power; a non-initial chart step is never activated |
 | `SL-W001` | Warning | A live row cannot reach the left rail (unreachable branch) |
 | `SL-W002` | Warning | SFC section skipped (engine lands in M4) |
 | `SL-E010` | Error | A rung or section id is used twice |
 | `SL-W010` | Warning | The project has no rungs |
-| `SL-W011` | Warning | A rung is empty |
 | `SL-W020` | Warning | A simulation-bench widget addresses the wrong variable kind, or has an inverted range |
 | `SL-E030` | Error | A ClassicLadder document is malformed (bad container, unusable numbers, unparsable part) |
 | `SL-W030` | Warning | A ClassicLadder element or structure has no SoftLadder equivalent and was skipped or approximated |

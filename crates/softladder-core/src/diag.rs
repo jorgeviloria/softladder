@@ -18,9 +18,10 @@
 //! | `SL-E007` | error | a call to an undefined or non-subroutine section |
 //! | `SL-E008` | error | the subroutine call stack overflowed |
 //! | `SL-E009` | error | two elements are placed on the same cell |
-//! | `SL-E011` | error | a section references a rung id that does not exist |
-//! | `SL-W001` | warning | a live row has no path to power (empty column 0, no vertical link) |
-//! | `SL-W002` | warning | an SFC section was skipped (engine lands in M4) |
+//! | `SL-E011` | error | a section references a rung, step or page that does not exist |
+//! | `SL-W001` | warning | a live row has no path to power (empty column 0, no vertical link), or an SFC step no transition can activate |
+//! | `SL-W002` | warning | an SFC section cannot run: it has no page, or a transition names a step the page does not define |
+//! | `SL-W011` | warning | an SFC transition has no condition, so it always fires |
 //!
 //! The CLI adds the project-level `SL-E010` (duplicate id), `SL-W010` (no rungs)
 //! and `SL-W011` (empty rung); `softladder-edit` adds `SL-W020` for a

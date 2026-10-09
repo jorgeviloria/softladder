@@ -46,8 +46,8 @@ rebuilds everything around it:
 
 ## Status
 
-**M3 complete, M4 under way.** The engine runs ladder and ClassicLadder projects work; the SFC
-(Grafcet) language is being finished. What works today:
+**M3 complete, M4 under way.** The engine runs ladder *and* sequential function charts, and
+ClassicLadder projects work in both languages; the SFC editor is what remains. What works today:
 
 - **a real editor UI**, rebuilt against the industrial tools (TIA Portal, Studio 5000, CODESYS,
   TwinCAT, GX Works): a ribbon of command groups, a project tree, document tabs, a ladder document on
@@ -56,6 +56,9 @@ rebuilds everything around it:
   operator-screen simulation bench and a status bar of badges ([`docs/UX.md`](docs/UX.md));
 - **the full ladder engine** — every element, jumps and subroutines, structured diagnostics
   ([`docs/SEMANTICS.md`](docs/SEMANTICS.md));
+- **SFC/Grafcet execution** — charts of steps and transitions with initial steps, AND
+  divergences/convergences and OR branches, run with the classic single-snapshot evolution rule and
+  publishing `%X<n>.A`/`%X<n>.V` (the editor for it is the next milestone);
 - **ClassicLadder import and export**, validated against all 41 upstream example projects
   ([`docs/COMPAT.md`](docs/COMPAT.md), [`testdata/known-divergences.md`](testdata/known-divergences.md));
 - `.slprj` schema v2 with a migration chain from v1, and reproducible headless runs

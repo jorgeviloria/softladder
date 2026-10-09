@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — M4 sequential (engine and interoperability)
+
+### Added
+
+- **SFC (Grafcet) execution.** A chart lives in an `Sfc` section as a page of steps
+  and transitions; the engine runs each chart once per scan in section order with
+  the classic single-snapshot rule — every transition is evaluated against the
+  step state at the start of the section (all of its source steps active), then
+  the union of the sources is cleared and the union of the targets set, so a chain
+  advances one transition per scan instead of firing through. Initial steps
+  activate on `refresh()`; each step publishes `%X<n>.A` (activity) and
+  `%X<n>.V` (elapsed milliseconds); AND divergences/convergences and OR branches
+  are supported. `SL-W002` no longer means "skipped".
+- **`sequential.csv` interoperability.** The ClassicLadder part moved from
+  passthrough to regenerated: `P`/`S`/`T`/`C`/`N` records are read (translating
+  array slots into the step numbers `%X<n>` addresses), unmappable records are
+  reported with a location, a page no section references gets a synthesized
+  section, and the exporter rewrites the part deterministically. All eight charts
+  in the corpus (73 steps, 100 transitions) import, scan without errors and stay
+  `import → export → import` fixed points.
+- `Section::sequential_page` (additive, skipped when absent, so `schema_version`
+  stays 2 and existing project bytes are unchanged) and a real
+  `softladder-core::sfc` model.
+- Chart diagnostics: `SL-W002` (a chart with no page, a transition naming a step
+  outside its page), `SL-W011` (a transition with no condition), `SL-W001` (a
+  step no transition activates) and `SL-E011` (a transition whose step does not
+  exist), each naming the page, step or transition.
+
+### Fixed
+
+- Ladder diagnostics were attributed to the last SFC section in the project; the
+  section index is now set per section.
+
 ## [Unreleased] — UI/UX redesign
 
 The editor's interface was rebuilt against the tools people actually program PLCs

@@ -33,7 +33,8 @@ The field order below is the order `serde` emits, and therefore the order that a
       "name": "Main",
       "language": "Ladder",          // "Ladder" | "Sfc"
       "subroutine": null,            // number when it is a subroutine
-      "rungs": [0, 1]
+      "rungs": [0, 1],
+      "sequential_page": null        // the chart, when language is "Sfc"; omitted when null
     }
   ],
   "rungs": [
@@ -90,6 +91,10 @@ The field order below is the order `serde` emits, and therefore the order that a
   [`ELEMENTS.md`](ELEMENTS.md).
 - `Symbol` binds a mnemonic to a variable: `var` is optional (`#[serde(default)]`), so a symbol
   without a binding is still valid.
+- `sequential_page` carries an SFC section's chart (its comment, steps and transitions); it is
+  skipped when absent, so a ladder project's bytes are unchanged and `schema_version` stays 2. See
+  [`ELEMENTS.md`](ELEMENTS.md) §Sequential for the model and [`SEMANTICS.md`](SEMANTICS.md) §4 for
+  how the engine evolves it.
 
 ### Accessors (schema v2)
 

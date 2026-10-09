@@ -10,7 +10,7 @@
 //! * [`expr`] — expression tokenizer, Pratt parser and evaluator.
 //! * [`scan`] — variable store, function blocks and the deterministic engine.
 //! * [`sim`] — simulation panel (bench layout) and its runtime positions.
-//! * [`sfc`] — Sequential Function Chart model (engine lands in M4).
+//! * [`sfc`] — Sequential Function Chart model (pages, steps, transitions).
 //! * [`diag`] — diagnostics shared by loading, linting and scanning.
 
 #![forbid(unsafe_code)]
