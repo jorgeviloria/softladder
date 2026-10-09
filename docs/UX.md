@@ -191,3 +191,54 @@ rasterises the tessellated frame (plus the font atlas) into PNGs under `target/u
 visual change is checked against those images before it is committed, and the shot list covers the
 states above: opening a project, selecting an element, running, placing an element, each tab, the
 dialogs, and a narrow window.
+
+## 12. SFC editor
+
+Sequential Function Chart is the second language, and the vendors give it its own editor rather than
+a mode of the ladder one: **TIA Portal GRAPH**, **CODESYS SFC**, **Studio 5000 SFC**, **GX Works
+SFC**. Those tools share a look, and this is what we follow.
+
+**A document per section.** An SFC section opens its own tab next to the ladder ones, labelled with
+the section name and an `SFC` chip; the project tree shows the same chip on the section node.
+Selecting a section in the tree opens the right document for its language.
+
+**The page is the sheet.** A page is drawn on `tokens.paper` with the same sheet, border and grid as
+the ladder document, but the grid is square and coarse (a step or a transition occupies one cell, as
+in the reference's 32 × 32 pages). A section with several pages shows them as bands down the sheet
+with the page comment in the header, exactly like the ladder's networks; the page selector in the
+inspector jumps between them.
+
+**Steps and transitions are schematic.** A step is a square with its number inside; the **initial
+step** is drawn with a doubled border and an `init` chip, the way GRAPH does. A step that is active
+while the bench runs is filled in `tokens.energised` with its number in white and its elapsed time
+(`%X<n>.V`) as a value chip beside it. A transition is a short horizontal bar crossed by the
+condition, drawn as a bar plus a hairline, with the condition written beside it (the tag name over
+the address, as on the ladder) and a tooltip that shows the whole expression. An **AND divergence or
+convergence** is drawn with the double bar of the IEC notation, an OR with the single one, so the two
+are distinguishable at a glance — this is where the vendors' drawings earn their keep.
+
+**Links are drawn as wiring.** Vertical lines connect a step to the transitions it feeds and a
+transition to the steps it activates, on the same sheet grid, with the same idle/energised strokes as
+the ladder (`tokens.wire_idle` 2 px / `tokens.energised` 3 px). Links are not placed by hand: the
+editor derives them from the model's step and transition positions, so the drawing can never
+disagree with what the engine will run.
+
+**Palette.** The ribbon's Insert group changes with the document: *Initial step*, *Step*,
+*Transition*, *Link*, *AND divergence*, *OR divergence*, *Comment*. Placement is the ladder's —
+click the palette chip, click the cell, replace on an occupied cell as one undo step — and every
+edit is a `softladder-edit` command, so undo/redo, the dirty mark and the Problem list work exactly
+as they do on the ladder.
+
+**Inspector.** With a step selected: number, initial flag, page and position, and its activity and
+timer while running. With a transition selected: the condition (a variable field with the same
+validation and tag picker as the ladder, or an expression), and the steps it activates and
+deactivates. With a page selected: the comment.
+
+**Live state and validation.** While the bench runs, active steps are filled, true transitions are
+emphasised, and step times update in place. Diagnostics land in the Problems document with a
+location (`page n · step m`), and clicking a row opens the SFC page and selects the element — the
+same gesture as the ladder, because it is the same panel.
+
+**Not in the first cut:** macro steps, variable-based step numbers, action qualifiers as separate
+boxes, and printing an SFC page. They are recorded here so the first cut is judged against a list
+rather than against a memory.
