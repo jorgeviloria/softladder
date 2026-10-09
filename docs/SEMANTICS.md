@@ -297,6 +297,18 @@ scan_once(now_ms):
 A scan is *deterministic*: it depends only on the project, the variable state and `now_ms`. Nothing
 reads the clock, the filesystem or the network.
 
+
+### The shift and rotate carry
+
+`SHL`, `SHR`, `ROL` and `ROR` are the one impure thing in an expression, and the impurity is not
+theirs: the evaluator stays pure and *reports* what they did. ClassicLadder reads the operand's most
+significant bit for a left shift or rotate and its least significant bit for a right one — whatever
+the shift count, and *before* shifting — and writes it to the system bit `%S8`; when an expression
+runs several of them, the last one wins. SoftLadder publishes that same bit (`VarKind::System`,
+index 8, named `SHIFT_CARRY_BIT`) right after the expression is evaluated, so a later rung in the
+same scan reads what an earlier one wrote. A scan that runs no shift never touches the bit, which is
+what a project that sets it by hand expects.
+
 ## 5. Diagnostics
 
 | Code | Severity | Raised when |

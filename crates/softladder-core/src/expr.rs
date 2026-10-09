@@ -220,6 +220,24 @@ impl fmt::Display for Function {
     }
 }
 
+/// What evaluating an expression did besides producing a value.
+///
+/// Expressions are pure, with one exception inherited from ClassicLadder: `SHL`,
+/// `SHR`, `ROL` and `ROR` write the bit that left the operand into the system bit
+/// `%S8` (`VAR_SYSTEM`, 8) as they run. A pure evaluator cannot do that behind the
+/// caller's back, so it *reports* it instead and the engine writes the bit — see
+/// `docs/SEMANTICS.md`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EvalEffects {
+    /// The bit a shift or rotate pushed out, if the expression ran one.
+    ///
+    /// ClassicLadder reads the operand's most significant bit for `SHL`/`ROL` and
+    /// its least significant bit for `SHR`/`ROR`, whatever the shift count, and
+    /// the **last** such operation in the expression wins, because the reference
+    /// writes `%S8` as each one executes.
+    pub shift_carry: Option<bool>,
+}
+
 /// Expression abstract syntax tree.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Expr {
@@ -244,6 +262,11 @@ impl Expr {
     /// Evaluates this expression against `source`.
     pub fn eval(&self, source: &dyn VarSource) -> Result<Value, EvalError> {
         eval(self, source)
+    }
+
+    /// Evaluates this expression and reports the effects it had on the machine.
+    pub fn eval_with(&self, source: &dyn VarSource) -> Result<(Value, EvalEffects), EvalError> {
+        eval_with(self, source)
     }
 }
 
@@ -852,10 +875,25 @@ pub fn parse(input: &str) -> Result<Expr, EvalError> {
 
 /// Evaluates `expr` against `source`.
 pub fn eval(expr: &Expr, source: &dyn VarSource) -> Result<Value, EvalError> {
-    eval_at(expr, source, 0)
+    eval_with(expr, source).map(|(value, _)| value)
 }
 
-fn eval_at(expr: &Expr, source: &dyn VarSource, depth: u32) -> Result<Value, EvalError> {
+/// Evaluates `expr` and reports what it did to the machine besides the value.
+///
+/// This is what the engine calls: a shift or rotate inside the expression leaves
+/// its carry in [`EvalEffects::shift_carry`] for the caller to write to `%S8`.
+pub fn eval_with(expr: &Expr, source: &dyn VarSource) -> Result<(Value, EvalEffects), EvalError> {
+    let mut effects = EvalEffects::default();
+    let value = eval_at(expr, source, 0, &mut effects)?;
+    Ok((value, effects))
+}
+
+fn eval_at(
+    expr: &Expr,
+    source: &dyn VarSource,
+    depth: u32,
+    effects: &mut EvalEffects,
+) -> Result<Value, EvalError> {
     if depth > MAX_DEPTH {
         return Err(EvalError::TooComplex);
     }
@@ -865,15 +903,15 @@ fn eval_at(expr: &Expr, source: &dyn VarSource, depth: u32) -> Result<Value, Eva
             .get(var)
             .ok_or_else(|| EvalError::UnknownVar(var.clone())),
         Expr::Unary(op, inner) => {
-            let value = eval_at(inner, source, depth + 1)?;
+            let value = eval_at(inner, source, depth + 1, effects)?;
             match op {
                 UnaryOp::Neg => value.negate(),
                 UnaryOp::Not => value.complement(),
             }
         }
         Expr::Binary(op, lhs, rhs) => {
-            let left = eval_at(lhs, source, depth + 1)?;
-            let right = eval_at(rhs, source, depth + 1)?;
+            let left = eval_at(lhs, source, depth + 1, effects)?;
+            let right = eval_at(rhs, source, depth + 1, effects)?;
             match op {
                 BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Rem => {
                     left.arith(right, *op)
@@ -890,15 +928,19 @@ fn eval_at(expr: &Expr, source: &dyn VarSource, depth: u32) -> Result<Value, Eva
         Expr::Call(function, args) => {
             let mut values = Vec::with_capacity(args.len());
             for arg in args {
-                values.push(eval_at(arg, source, depth + 1)?);
+                values.push(eval_at(arg, source, depth + 1, effects)?);
             }
-            call_function(*function, &values)
+            call_function(*function, &values, effects)
         }
     }
 }
 
 /// Applies a built-in function to already evaluated arguments.
-fn call_function(function: Function, args: &[Value]) -> Result<Value, EvalError> {
+fn call_function(
+    function: Function,
+    args: &[Value],
+    effects: &mut EvalEffects,
+) -> Result<Value, EvalError> {
     let word = |value: &Value| -> i32 { value.as_i64() as i32 };
     match function {
         Function::Abs => {
@@ -951,6 +993,14 @@ fn call_function(function: Function, args: &[Value]) -> Result<Value, EvalError>
                 )));
             }
             let bits = value as u32;
+            // `arithm_eval.c` reads the operand's sign bit for a left shift or
+            // rotate and its low bit for a right one, *before* shifting and
+            // whatever the count, and writes it to `%S8`.
+            effects.shift_carry = Some(match function {
+                Function::Shl | Function::Rol => bits & 0x8000_0000 != 0,
+                Function::Shr | Function::Ror => bits & 1 != 0,
+                _ => false,
+            });
             let result = match function {
                 Function::Shl => bits.wrapping_shl(amount),
                 // The reference implementation masks the sign bit off a logical
@@ -1184,5 +1234,66 @@ mod tests {
         assert_eq!(parse("shl(1,4)").expect("parses").to_string(), "SHL(1, 4)");
         assert_eq!(evaluate("MAX(SHL(1, 2), 3)", &vars), Ok(Value::Word(4)));
         assert_eq!(evaluate("SHL(%MW0, 1)", &vars), Ok(Value::Word(12)));
+    }
+    /// ClassicLadder reads the operand's most significant bit for a left shift or
+    /// rotate, whatever the amount, and writes it to `%S8`.
+    #[test]
+    fn a_left_shift_or_rotate_reports_the_sign_bit() {
+        let vars = TestVars::new(&[("%MW0", Value::Word(-32768)), ("%MW1", Value::Word(1))]);
+        for source in ["SHL(%MW0,1)", "ROL(%MW0,7)"] {
+            let expr: Expr = source.parse().expect("an expression parses");
+            let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
+            assert_eq!(effects.shift_carry, Some(true), "{source}");
+        }
+        for source in ["SHL(%MW1,1)", "ROL(%MW1,3)"] {
+            let expr: Expr = source.parse().expect("an expression parses");
+            let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
+            assert_eq!(effects.shift_carry, Some(false), "{source}");
+        }
+    }
+
+    /// ... and its low bit for a right one.
+    #[test]
+    fn a_right_shift_or_rotate_reports_the_low_bit() {
+        let vars = TestVars::new(&[("%MW0", Value::Word(1)), ("%MW1", Value::Word(2))]);
+        for source in ["SHR(%MW0,1)", "ROR(%MW0,9)"] {
+            let expr: Expr = source.parse().expect("an expression parses");
+            let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
+            assert_eq!(effects.shift_carry, Some(true), "{source}");
+        }
+        for source in ["SHR(%MW1,1)", "ROR(%MW1,1)"] {
+            let expr: Expr = source.parse().expect("an expression parses");
+            let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
+            assert_eq!(effects.shift_carry, Some(false), "{source}");
+        }
+    }
+
+    #[test]
+    fn the_last_shift_in_an_expression_wins() {
+        // `%MW0` is negative (a left shift reports true) and `%MW1` is even (a
+        // right shift reports false), so the carry must be the *last* one that
+        // ran: the reference writes `%S8` as each operation executes.
+        let vars = TestVars::new(&[("%MW0", Value::Word(-32768)), ("%MW1", Value::Word(2))]);
+        let expr: Expr = "SHL(%MW0,1) + SHR(%MW1,1)"
+            .parse()
+            .expect("an expression parses");
+        let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
+        assert_eq!(effects.shift_carry, Some(false));
+
+        let expr: Expr = "SHR(%MW1,1) + SHL(%MW0,1)"
+            .parse()
+            .expect("an expression parses");
+        let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
+        assert_eq!(effects.shift_carry, Some(true));
+    }
+
+    #[test]
+    fn an_expression_without_a_shift_reports_nothing() {
+        let vars = TestVars::new(&[("%MW0", Value::Word(4))]);
+        let expr: Expr = "(%MW0 + 1) * 2".parse().expect("an expression parses");
+        let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
+        assert_eq!(effects.shift_carry, None, "nothing to publish");
+        // And the pure entry point still returns only the value.
+        assert_eq!(expr.eval(&vars), Ok(Value::Word(10)));
     }
 }

@@ -43,7 +43,7 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use crate::diag::{Diagnostic, Severity};
-use crate::expr::{eval, parse, Expr, Value, VarSource};
+use crate::expr::{eval_with, parse, Expr, Value, VarSource};
 use crate::model::{
     CounterKind, ElementKind, PlacedElement, Project, RegisterMode, Rung, Section, SectionLanguage,
     TimerMode, WireMode,
@@ -2053,6 +2053,22 @@ impl Machine<'_> {
     /// with the default 100 ms base is three units. A parameter that names a
     /// variable is read through the store and is used as it stands, which lets a
     /// project hold presets in whatever unit it prefers.
+    /// Publishes the carry a shift or rotate left behind in the expression it ran
+    /// in, as the reference does: the bit goes to `%S8`.
+    ///
+    /// A scan that runs no shift never touches the bit, so a project that sets it
+    /// by hand — or that reads it after a shift in an earlier rung of the same
+    /// scan — sees what the reference would.
+    fn write_shift_carry(&mut self, effects: crate::expr::EvalEffects) {
+        let Some(carry) = effects.shift_carry else {
+            return;
+        };
+        let var = VarRef::new(VarKind::System, crate::vars::SHIFT_CARRY_BIT);
+        if let Err(error) = self.store.set(&var, Value::Bit(carry)) {
+            self.error("SL-E003", format!("cannot write `{var}`: {error}"));
+        }
+    }
+
     fn block_preset_units(&mut self, element: &PlacedElement, base: TimeBase) -> u64 {
         let Some(parameter) = element.params.first().map(|text| text.trim().to_owned()) else {
             return 0;
@@ -2327,8 +2343,11 @@ impl Machine<'_> {
                 return false;
             }
         };
-        match parse(&expression).and_then(|expr| eval(&expr, self.store)) {
-            Ok(value) => value.as_bool() && input,
+        match parse(&expression).and_then(|expr| eval_with(&expr, self.store)) {
+            Ok((value, effects)) => {
+                self.write_shift_carry(effects);
+                value.as_bool() && input
+            }
             Err(error) => {
                 self.error(
                     "SL-E002",
@@ -2375,8 +2394,11 @@ impl Machine<'_> {
                 return;
             }
         };
-        let value = match parse(expression).and_then(|expr| eval(&expr, self.store)) {
-            Ok(value) => value,
+        let value = match parse(expression).and_then(|expr| eval_with(&expr, self.store)) {
+            Ok((value, effects)) => {
+                self.write_shift_carry(effects);
+                value
+            }
             Err(error) => {
                 self.error(
                     "SL-E002",
@@ -4084,6 +4106,123 @@ mod tests {
         assert_eq!(get(&engine, "%Q0"), Some(Value::Bit(true)));
         assert_eq!(get(&engine, "%Q1"), Some(Value::Bit(false)));
         assert!(has(&report, "SL-E002"), "division by zero is SL-E002");
+    }
+
+    /// ClassicLadder's `SHL`/`SHR`/`ROL`/`ROR` write the bit that left the
+    /// operand into `%S8`; the engine must publish it, and a scan that runs no
+    /// shift must leave the bit alone.
+    #[test]
+    fn a_shift_publishes_its_carry_to_the_system_bit() {
+        let mut engine = engine(vec![rung(
+            1,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                element_with(ElementKind::Operate, None, 1, 0, &["%MW0", "SHL(%MW1,1)"]),
+            ],
+        )]);
+        set_bit(&mut engine, "%I0", true);
+
+        // The sign bit leaves: `%S8` is set.
+        engine
+            .store_mut()
+            .set(&var("%MW1"), Value::Word(-32768))
+            .expect("word is writable");
+        engine.scan_once(0);
+        assert_eq!(get(&engine, "%S8"), Some(Value::Bit(true)));
+
+        // A low bit leaves: `%S8` is cleared.
+        engine
+            .store_mut()
+            .set(&var("%MW1"), Value::Word(1))
+            .expect("word is writable");
+        engine.scan_once(10);
+        assert_eq!(get(&engine, "%S8"), Some(Value::Bit(false)));
+    }
+
+    /// The other half of the reference's rule: a right shift or rotate reports
+    /// the operand's low bit, not its sign.
+    #[test]
+    fn a_right_shift_publishes_the_low_bit() {
+        let mut engine = engine(vec![rung(
+            1,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                element_with(ElementKind::Operate, None, 1, 0, &["%MW0", "SHR(%MW1,1)"]),
+            ],
+        )]);
+        set_bit(&mut engine, "%I0", true);
+        engine
+            .store_mut()
+            .set(&var("%MW1"), Value::Word(1))
+            .expect("word is writable");
+        engine.scan_once(0);
+        assert_eq!(get(&engine, "%S8"), Some(Value::Bit(true)));
+
+        engine
+            .store_mut()
+            .set(&var("%MW1"), Value::Word(2))
+            .expect("word is writable");
+        engine.scan_once(10);
+        assert_eq!(get(&engine, "%S8"), Some(Value::Bit(false)));
+    }
+
+    #[test]
+    fn a_scan_without_a_shift_leaves_the_carry_alone() {
+        let mut engine = engine(vec![rung(
+            1,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                element_with(ElementKind::Operate, None, 1, 0, &["%MW0", "SHL(%MW1,1)"]),
+            ],
+        )]);
+        engine
+            .store_mut()
+            .set(&var("%MW1"), Value::Word(-32768))
+            .expect("word is writable");
+        set_bit(&mut engine, "%I0", true);
+        engine.scan_once(0);
+        assert_eq!(get(&engine, "%S8"), Some(Value::Bit(true)));
+
+        // The rung goes dead: the block does not evaluate, so the bit it set on
+        // the previous scan stays where the reference would leave it.
+        set_bit(&mut engine, "%I0", false);
+        engine.scan_once(10);
+        assert_eq!(
+            get(&engine, "%S8"),
+            Some(Value::Bit(true)),
+            "a scan with no shift must not touch the bit"
+        );
+    }
+
+    #[test]
+    fn a_later_rung_reads_the_carry_in_the_same_scan() {
+        let mut engine = engine(vec![
+            rung(
+                1,
+                vec![
+                    element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                    element_with(ElementKind::Operate, None, 1, 0, &["%MW0", "SHL(%MW1,1)"]),
+                ],
+            ),
+            rung(
+                2,
+                vec![
+                    element(ElementKind::ContactNo, Some("%S8"), 0, 0),
+                    element(ElementKind::CoilOut, Some("%Q0"), 1, 0),
+                ],
+            ),
+        ]);
+        set_bit(&mut engine, "%I0", true);
+        engine
+            .store_mut()
+            .set(&var("%MW1"), Value::Word(-32768))
+            .expect("word is writable");
+        engine.scan_once(0);
+        assert_eq!(
+            get(&engine, "%Q0"),
+            Some(Value::Bit(true)),
+            "the second rung reads what the first one wrote"
+        );
     }
 
     #[test]

@@ -24,7 +24,15 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
+/// The system bit ClassicLadder uses for the shift and rotate carry (`%S8`).
+///
+/// `SHL`, `SHR`, `ROL` and `ROR` write the bit that left the operand here as they
+/// evaluate; see [`crate::expr::EvalEffects`].
+pub const SHIFT_CARRY_BIT: u32 = 8;
+
 /// Storage class of a SoftLadder variable.
+///
+/// Kinds of variable the engine can address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VarKind {
     /// Internal bit memory (`%M`). ClassicLadder alias: `%B`.

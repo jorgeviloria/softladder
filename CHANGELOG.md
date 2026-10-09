@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — the shift and rotate carry
+
+### Fixed
+
+- **`%S8` is written by the shift and rotate functions again**, closing divergence 2 of
+  `testdata/known-divergences.md`. `SHL`, `SHR`, `ROL` and `ROR` report the operand's most
+  significant bit for a left shift or rotate and its least significant bit for a right one —
+  whatever the count, and before shifting — exactly as `arithm_eval.c` does; the last such operation
+  in an expression wins, and the engine publishes it to the system bit `%S8` as soon as the
+  expression is evaluated, so a later rung of the same scan reads it. A scan that runs no shift never
+  touches the bit. The evaluator stays pure: it *reports* the carry (`EvalEffects`) and the engine
+  writes it.
+
 ## [Unreleased] — the SFC editor
 
 ### Added

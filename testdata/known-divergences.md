@@ -24,19 +24,7 @@ flag as a variable.
 
 **Affects:** imported rungs that chain an element after a counter's row `y+1` or `y+2`.
 
-## 2. Rotate and shift side effects
-
-**Reference:** `SHL`, `SHR`, `ROL` and `ROR` write the bit that fell off the end into the system bit
-`%S8` as a side effect of evaluating the expression.
-
-**SoftLadder:** expressions are pure; the bit is not recorded.
-
-**Why:** a pure evaluator cannot be surprised by the order in which rungs are scanned, and `%SW`-style
-system words are not modelled at all. A project that reads `%S8` will see it stay `false`; the
-importer reports `SL-W031` for `%S` references it cannot represent, and this case is documented here
-because `%S8` itself *is* representable (it parses fine, it simply never changes).
-
-## 3. Word width in expressions
+## 2. Word width in expressions
 
 **Reference:** words are stored as C `int` and the shifts are 32-bit (with the arithmetic shift right
 masked to clear the sign bit).
@@ -46,7 +34,7 @@ the top, and `ROL`/`ROR` rotate over 32 bits.
 
 No divergence — recorded because the format's `$8000` literals look 16-bit and are not.
 
-## 4. Rung geometry limits
+## 3. Rung geometry limits
 
 **Reference:** a fixed 12 × 8 matrix per rung and 5 sequential pages of 32 × 32.
 
@@ -56,7 +44,7 @@ No divergence — recorded because the format's `$8000` literals look 16-bit and
 **Why:** the whole point of the new editor is that the grid stops being a cage. Imported projects are
 inside the limits by construction.
 
-## 5. Expression syntax
+## 4. Expression syntax
 
 **Reference:** `@<type>/<num>@` variable placeholders, `:=` for assignment, `&`/`|` for `AND`/`OR`,
 `$`-prefixed hexadecimal literals, and the function names `ABS`, `MINI`, `MAXI`, `MOY`, `POW`, `SHL`,
@@ -70,7 +58,7 @@ accepted. The importer translates in both directions.
 `MIN`/`MAX`/`AVG` are the IEC spellings. Untranslatable text is kept verbatim with `SL-W031` so it is
 visible in the Problems panel rather than silently dropped.
 
-## 6. Features SoftLadder has and the format cannot express
+## 5. Features SoftLadder has and the format cannot express
 
 A simulation-bench panel, bit accessors (`%MW0.3`), indexed variables in a symbol or an expression
 position the reference cannot address, and columns or rows outside the reference matrix are all
@@ -79,7 +67,7 @@ be in this list; since M4 they round-trip through `sequential.csv` — see
 [`../docs/COMPAT.md`](../docs/COMPAT.md) §8.4.) The SoftLadder
 project keeps them; the exported copy is lossy by definition and says so.
 
-## 7. Variable families that are not modelled
+## 6. Variable families that are not modelled
 
 `%SW<n>` (system words), `%T<n>.R` (the deprecated timer's running bit) and `%M<n>.R` (the deprecated
 monostable's running bit) have no SoftLadder equivalent. An element that references one is skipped
@@ -87,14 +75,28 @@ with `SL-W030` and the variable is reported with `SL-W031`; the deprecated timer
 *blocks* themselves are imported as IEC timers (`On` and `Pulse` respectively) with their preset and
 base preserved.
 
+## Closed
+
+* **The rotate and shift side effect (was item 2).** `SHL`, `SHR`, `ROL` and `ROR` now publish the
+  bit that left the operand to `%S8`, exactly as `arithm_eval.c` does it: the operand's most
+  significant bit for a left shift or rotate, its least significant bit for a right one, whatever the
+  count, with the last such operation in an expression winning. A scan that runs no shift leaves the
+  bit alone. See [`../docs/SEMANTICS.md`](../docs/SEMANTICS.md) §4, "The shift and rotate carry".
+
+* **Residual, found while closing it.** ClassicLadder's own demonstration,
+  `WordsShiftsLeftRightExample.clprj`, does not become live through our import: with every
+  `%I1`…`%I9` contact closed its coils still read false, so its arithmetic cells never execute. The
+  carry is therefore validated in `softladder-core` (per function, last-wins, and a rung that reads
+  `%S8` in the same scan) and the file is covered by an import-and-scan smoke test. Whether those
+  rows should be live is an import question for the next milestone review, not a carry question.
+
 ## Closing these
 
-Item 2 is cheap to close and is the next thing to do if a real project reads `%S8`: it would become a
-system bit written by the shift and rotate functions. Item 1 is a different trade: the counter's
-output rows would have to become three cells instead of one, putting the reference's body-cell
-geometry back into the model, for a difference that shows only in a rung that chains off a *secondary*
-row of a block — the flag itself is already readable as a variable (`%C0.E`, `%C0.F`, …). Items 3 to 7
-are the shape of the two implementations rather than gaps to close.
+Item 1 is a trade rather than a gap: closing it would turn a counter's single output cell into three,
+putting the reference's body-cell geometry back into the model, for a difference that shows only in a
+rung that chains off a *secondary* row of a block — the flag itself is already readable as a variable
+(`%C0.E`, `%C0.F`, …). Items 2 to 6 are the shape of the two implementations rather than gaps to
+close.
 
 The SFC milestone (M4) has landed, and the sequential projects were measured the way this corpus was:
 eight charts, 73 steps and 100 transitions import, run and round-trip exactly (see

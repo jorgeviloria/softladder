@@ -46,3 +46,7 @@ network still passes `cargo test --workspace`.
 Every behavioural difference between SoftLadder and the reference that the corpus exposed,
 with what each side does and why we chose ours. Read it before claiming a project "runs
 the same": the format round-trips exactly, but a handful of circuits legitimately differ.
+
+The file has a **Closed** section for the entries a milestone has closed (the shift and rotate
+carry, `%S8`, is the first) and records any residual it left behind, so a reader can tell a gap we
+chose not to close from one we have not reached yet.
