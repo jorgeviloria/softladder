@@ -199,6 +199,159 @@ pub fn entries() -> &'static [Entry] {
     &ENTRIES
 }
 
+/// A tool of the sequential (SFC) document.
+///
+/// `docs/UX.md` §12: the ribbon's Insert group changes with the document, and an
+/// SFC section offers the chart's own vocabulary rather than contacts and coils.
+/// The tools are deliberately plain values: what a click *does* with one (which
+/// commands it applies, and with which links) is decided by
+/// [`crate::sfc`], which can see the chart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SfcTool {
+    /// Place a step that is active at start-up.
+    InitialStep,
+    /// Place an ordinary step.
+    Step,
+    /// Place a transition, with no links and no condition.
+    Transition,
+    /// Link a step to a transition, or a transition to a step.
+    Link,
+    /// Place an AND divergence or convergence: a transition joining every step
+    /// of the parallel group above and below it, drawn with the double bar.
+    AndDivergence,
+    /// Place one branch of an OR divergence: a transition leaving the nearest
+    /// step above and entering the nearest step below.
+    OrDivergence,
+    /// Edit the page's comment.
+    Comment,
+}
+
+impl SfcTool {
+    /// Every tool, in the order the ribbon shows them.
+    pub const ALL: [SfcTool; 7] = [
+        SfcTool::InitialStep,
+        SfcTool::Step,
+        SfcTool::Transition,
+        SfcTool::Link,
+        SfcTool::AndDivergence,
+        SfcTool::OrDivergence,
+        SfcTool::Comment,
+    ];
+
+    /// The entry that places this tool.
+    pub fn entry(self) -> &'static SfcEntry {
+        SFC_ENTRIES
+            .iter()
+            .find(|entry| entry.tool == self)
+            .unwrap_or(&SFC_ENTRIES[0])
+    }
+}
+
+/// One button of the sequential palette.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SfcEntry {
+    /// What the button places or does.
+    pub tool: SfcTool,
+    /// Full name, as the Insert menu and the tooltip spell it.
+    pub label: &'static str,
+    /// Short caption drawn on the ribbon chip.
+    pub caption: &'static str,
+    /// Letter that arms this entry from the canvas.
+    pub letter: char,
+    /// Logical key matching [`SfcEntry::letter`].
+    pub key: Key,
+    /// One-line description shown on hover.
+    pub tooltip: &'static str,
+}
+
+/// The sequential palette, in the order `docs/UX.md` §12 lists it.
+pub static SFC_ENTRIES: [SfcEntry; 7] = [
+    SfcEntry {
+        tool: SfcTool::InitialStep,
+        label: "Initial step",
+        caption: "Init",
+        letter: 'I',
+        key: Key::I,
+        tooltip: "Place the step that is active when the section starts",
+    },
+    SfcEntry {
+        tool: SfcTool::Step,
+        label: "Step",
+        caption: "Step",
+        letter: 'S',
+        key: Key::S,
+        tooltip: "Place an ordinary step",
+    },
+    SfcEntry {
+        tool: SfcTool::Transition,
+        label: "Transition",
+        caption: "Trans",
+        letter: 'T',
+        key: Key::T,
+        tooltip: "Place a transition; set its condition in the inspector",
+    },
+    SfcEntry {
+        tool: SfcTool::Link,
+        label: "Link",
+        caption: "Link",
+        letter: 'L',
+        key: Key::L,
+        tooltip: "Click a step and then a transition (or the other way round) to wire them",
+    },
+    SfcEntry {
+        tool: SfcTool::AndDivergence,
+        label: "AND divergence",
+        caption: "AND",
+        letter: 'A',
+        key: Key::A,
+        tooltip: "Place a transition joining every step above and below it (double bar)",
+    },
+    SfcEntry {
+        tool: SfcTool::OrDivergence,
+        label: "OR divergence",
+        caption: "OR",
+        letter: 'O',
+        key: Key::O,
+        tooltip: "Place a branch leaving the nearest step above for the nearest step below",
+    },
+    SfcEntry {
+        tool: SfcTool::Comment,
+        label: "Comment",
+        caption: "Note",
+        letter: 'C',
+        key: Key::C,
+        tooltip: "Select the page and edit its comment in the inspector",
+    },
+];
+
+/// The sequential palette.
+pub fn sfc_entries() -> &'static [SfcEntry] {
+    &SFC_ENTRIES
+}
+
+/// The sequential entry armed by `key`, if any.
+pub fn sfc_entry_for_key(key: Key) -> Option<&'static SfcEntry> {
+    SFC_ENTRIES.iter().find(|entry| entry.key == key)
+}
+
+/// The sequential tool armed by `key`, if any.
+pub fn sfc_tool_for_key(key: Key) -> Option<SfcTool> {
+    sfc_entry_for_key(key).map(|entry| entry.tool)
+}
+
+/// Short human-readable name of a sequential tool, for the status bar.
+pub fn sfc_short_name(tool: SfcTool) -> &'static str {
+    match tool {
+        SfcTool::InitialStep => "initial step",
+        SfcTool::Step => "step",
+        SfcTool::Transition => "transition",
+        SfcTool::Link => "link",
+        SfcTool::AndDivergence => "AND divergence",
+        SfcTool::OrDivergence => "OR divergence",
+        SfcTool::Comment => "comment",
+    }
+}
+
 /// Every element kind the palette can place, in palette order.
 pub fn all_kinds() -> Vec<ElementKind> {
     ENTRIES.iter().map(|entry| entry.kind).collect()

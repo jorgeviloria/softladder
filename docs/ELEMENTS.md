@@ -100,7 +100,8 @@ The engine runs a chart once per scan with the evolution rule of [`SEMANTICS.md`
 and `import`/`export` map ClassicLadder's `sequential.csv` (see [`COMPAT.md`](COMPAT.md) §8.4).
 Diagnostics: `SL-W002` (a chart with no page, or a transition naming a step outside its page),
 `SL-W011` (a transition with no condition) and `SL-E011` (a transition whose step does not exist).
-The SFC **editor** is designed in [`UX.md`](UX.md) §12 and lands next.
+The SFC **editor** is implemented — the sequential document, its palette, its tree rows, its
+inspector and its diagnostics — and is described in [`UX.md`](UX.md) §12.
 
 ## Diagnostics vocabulary
 

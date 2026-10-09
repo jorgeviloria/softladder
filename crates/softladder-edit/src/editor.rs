@@ -8,8 +8,9 @@
 use std::path::{Path, PathBuf};
 
 use softladder_core::{
-    lint, Diagnostic, ElementKind, PlacedElement, Project, Rung, ScanConfig, ScanEngine, Section,
-    SectionLanguage, Severity, SimulationPanel, Symbol, VarRef,
+    lint, Diagnostic, ElementKind, Expr, PlacedElement, Project, Rung, ScanConfig, ScanEngine,
+    Section, SectionLanguage, SequentialPage, Severity, SimulationPanel, Step, Symbol, Transition,
+    VarRef,
 };
 use softladder_project::native;
 
@@ -427,6 +428,272 @@ impl Editor {
         self.apply(Command::SetScanConfig { scan })
     }
 
+    // -- sequential (SFC) commands ------------------------------------------
+
+    /// Gives `section` a fresh, empty page and returns its number.
+    ///
+    /// The number is the largest page number of the project plus one, so a new
+    /// page never collides with one an imported chart already uses. The comment
+    /// is empty; set it with [`Editor::set_page_comment`].
+    pub fn add_page(&mut self, section: u32) -> Result<u32, EditError> {
+        let number = self.fresh_page_number();
+        self.apply(Command::AddPage {
+            section,
+            page: SequentialPage::new(number, String::new()),
+        })?;
+        Ok(number)
+    }
+
+    /// Removes `section`'s page, with every step and transition on it.
+    pub fn remove_page(&mut self, section: u32) -> Result<(), EditError> {
+        self.apply(Command::RemovePage { section })
+    }
+
+    /// Replaces the comment of `section`'s page.
+    pub fn set_page_comment(&mut self, section: u32, comment: &str) -> Result<(), EditError> {
+        self.apply(Command::SetPageComment {
+            section,
+            comment: comment.to_owned(),
+        })
+    }
+
+    /// Inserts a fresh step at `(x, y)` of `section`'s page and returns its number.
+    ///
+    /// The number is the largest step number of the project plus one, because
+    /// `%X<number>` is one variable shared by every page.
+    pub fn insert_step(
+        &mut self,
+        section: u32,
+        x: i32,
+        y: i32,
+        initial: bool,
+    ) -> Result<u32, EditError> {
+        let number = self.fresh_step_number();
+        let page = self.page_number(section);
+        let step = Step {
+            number,
+            is_initial: initial,
+            x,
+            y,
+            page,
+        };
+        self.apply(Command::InsertStep { section, step })?;
+        Ok(number)
+    }
+
+    /// Removes a step, and every reference the transitions made to it.
+    pub fn remove_step(&mut self, section: u32, step: u32) -> Result<(), EditError> {
+        self.apply(Command::RemoveStep { section, step })
+    }
+
+    /// Moves a step to another cell of its page.
+    pub fn move_step(&mut self, section: u32, step: u32, x: i32, y: i32) -> Result<(), EditError> {
+        self.apply(Command::MoveStep {
+            section,
+            step,
+            x,
+            y,
+        })
+    }
+
+    /// Renumbers a step, following every transition reference with it.
+    pub fn set_step_number(
+        &mut self,
+        section: u32,
+        step: u32,
+        number: u32,
+    ) -> Result<(), EditError> {
+        self.apply(Command::SetStepNumber {
+            section,
+            step,
+            number,
+        })
+    }
+
+    /// Sets whether a step is active at start-up.
+    pub fn set_step_initial(
+        &mut self,
+        section: u32,
+        step: u32,
+        initial: bool,
+    ) -> Result<(), EditError> {
+        self.apply(Command::SetStepInitial {
+            section,
+            step,
+            initial,
+        })
+    }
+
+    /// Inserts a fresh, unconditional transition at `(x, y)` and returns its number.
+    pub fn insert_transition(&mut self, section: u32, x: i32, y: i32) -> Result<u32, EditError> {
+        self.insert_transition_linked(section, x, y, &[], &[])
+    }
+
+    /// Inserts a fresh transition at `(x, y)` with its source and target steps.
+    ///
+    /// This is what the AND and OR divergence tools place: the wiring is decided
+    /// by the caller from the chart it can see and applied as one command, so a
+    /// divergence is a single undo step.
+    pub fn insert_transition_linked(
+        &mut self,
+        section: u32,
+        x: i32,
+        y: i32,
+        from: &[u32],
+        to: &[u32],
+    ) -> Result<u32, EditError> {
+        let number = self.fresh_transition_number();
+        let page = self.page_number(section);
+        let transition = Transition {
+            number,
+            condition: None,
+            from: sorted_set(from),
+            to: sorted_set(to),
+            page,
+            x,
+            y,
+        };
+        self.apply(Command::InsertTransition {
+            section,
+            transition,
+        })?;
+        Ok(number)
+    }
+
+    /// Removes a transition from its page.
+    pub fn remove_transition(&mut self, section: u32, transition: u32) -> Result<(), EditError> {
+        self.apply(Command::RemoveTransition {
+            section,
+            transition,
+        })
+    }
+
+    /// Moves a transition to another cell of its page.
+    pub fn move_transition(
+        &mut self,
+        section: u32,
+        transition: u32,
+        x: i32,
+        y: i32,
+    ) -> Result<(), EditError> {
+        self.apply(Command::MoveTransition {
+            section,
+            transition,
+            x,
+            y,
+        })
+    }
+
+    /// Sets or clears a transition's condition from its source text.
+    ///
+    /// Blank text clears it; text that does not parse as an expression is refused
+    /// with [`EditError::BadCondition`] and changes nothing.
+    pub fn set_transition_condition(
+        &mut self,
+        section: u32,
+        transition: u32,
+        text: &str,
+    ) -> Result<(), EditError> {
+        let condition = if text.trim().is_empty() {
+            None
+        } else {
+            Some(text.to_owned())
+        };
+        self.apply(Command::SetTransitionCondition {
+            section,
+            transition,
+            condition,
+        })
+    }
+
+    /// Replaces the steps a transition requires to be active.
+    pub fn set_transition_from(
+        &mut self,
+        section: u32,
+        transition: u32,
+        from: &[u32],
+    ) -> Result<(), EditError> {
+        self.apply(Command::SetTransitionFrom {
+            section,
+            transition,
+            from: from.to_vec(),
+        })
+    }
+
+    /// Replaces the steps a transition activates.
+    pub fn set_transition_to(
+        &mut self,
+        section: u32,
+        transition: u32,
+        to: &[u32],
+    ) -> Result<(), EditError> {
+        self.apply(Command::SetTransitionTo {
+            section,
+            transition,
+            to: to.to_vec(),
+        })
+    }
+
+    /// Adds `step` to (`linked`) or removes it from a transition's `from` set.
+    ///
+    /// This is the Link tool's edit: links are derived from the model's sets, so
+    /// drawing a wire is exactly this membership change, and undoing it undraws
+    /// the wire.
+    pub fn link_transition_from(
+        &mut self,
+        section: u32,
+        transition: u32,
+        step: u32,
+        linked: bool,
+    ) -> Result<(), EditError> {
+        let mut set = self.transition_of(section, transition)?.from;
+        set.retain(|entry| *entry != step);
+        if linked {
+            set.push(step);
+        }
+        self.set_transition_from(section, transition, &set)
+    }
+
+    /// Adds `step` to (`linked`) or removes it from a transition's `to` set.
+    pub fn link_transition_to(
+        &mut self,
+        section: u32,
+        transition: u32,
+        step: u32,
+        linked: bool,
+    ) -> Result<(), EditError> {
+        let mut set = self.transition_of(section, transition)?.to;
+        set.retain(|entry| *entry != step);
+        if linked {
+            set.push(step);
+        }
+        self.set_transition_to(section, transition, &set)
+    }
+
+    /// A copy of one transition of a section's page.
+    fn transition_of(&self, section: u32, transition: u32) -> Result<Transition, EditError> {
+        let position = self.require_section(section)?;
+        self.project
+            .sections
+            .get(position)
+            .and_then(|entry| entry.sequential_page.as_ref())
+            .ok_or(EditError::NoSequentialPage(section))?
+            .transition(transition)
+            .cloned()
+            .ok_or(EditError::UnknownTransition {
+                section,
+                transition,
+            })
+    }
+
+    /// The number of a section's page, or zero when it has none.
+    fn page_number(&self, section: u32) -> u32 {
+        self.project
+            .section(section)
+            .and_then(|entry| entry.sequential_page.as_ref())
+            .map_or(0, |page| page.number)
+    }
+
     // -- internals ----------------------------------------------------------
 
     /// Pushes an entry, enforces the history bound and invalidates the redo
@@ -459,6 +726,43 @@ impl Editor {
             .map(|section| section.id)
             .max()
             .map_or(0, |id| id.saturating_add(1))
+    }
+
+    /// The largest step number any page uses, plus one.
+    ///
+    /// Step numbers index the engine's one `%X` array, so they are unique across
+    /// the project rather than inside a page.
+    fn fresh_step_number(&self) -> u32 {
+        self.pages()
+            .flat_map(|page| page.steps.iter())
+            .map(|step| step.number)
+            .max()
+            .map_or(0, |number| number.saturating_add(1))
+    }
+
+    /// The largest transition number any page uses, plus one.
+    fn fresh_transition_number(&self) -> u32 {
+        self.pages()
+            .flat_map(|page| page.transitions.iter())
+            .map(|transition| transition.number)
+            .max()
+            .map_or(0, |number| number.saturating_add(1))
+    }
+
+    /// The largest page number the project uses, plus one.
+    fn fresh_page_number(&self) -> u32 {
+        self.pages()
+            .map(|page| page.number)
+            .max()
+            .map_or(0, |number| number.saturating_add(1))
+    }
+
+    /// Every sequential page of the project, in section order.
+    fn pages(&self) -> impl Iterator<Item = &SequentialPage> {
+        self.project
+            .sections
+            .iter()
+            .filter_map(|section| section.sequential_page.as_ref())
     }
 
     /// Position of a rung in `Project::rungs`.
@@ -881,7 +1185,455 @@ impl Editor {
                     after: *scan,
                 })
             }
+            Command::InsertStep { section, step } => {
+                let position = self.require_section(*section)?;
+                if self.step_number_taken(*section, step.number) {
+                    return Err(EditError::DuplicateStep(step.number));
+                }
+                let page = self.page_at(position, *section)?;
+                let replacing = page
+                    .step(step.number)
+                    .is_some_and(|existing| existing.x == step.x && existing.y == step.y);
+                if page.step(step.number).is_some() && !replacing {
+                    return Err(EditError::DuplicateStep(step.number));
+                }
+                let before = page.clone();
+                // Placement clears the cell it lands on, as one undo step; the
+                // numbers of the steps it displaced are pruned from the chart.
+                let displaced = clear_cell(page, step.x, step.y, Some(step.number));
+                for number in displaced {
+                    prune_step(page, number);
+                }
+                page.steps.push(step.clone());
+                sort_page(page);
+                let after = page.clone();
+                Ok(Edit::SfcPage {
+                    section: *section,
+                    before: Some(before),
+                    after: Some(after),
+                })
+            }
+            Command::RemoveStep { section, step } => {
+                let position = self.require_section(*section)?;
+                let page = self.page_at(position, *section)?;
+                let at = page
+                    .steps
+                    .iter()
+                    .position(|entry| entry.number == *step)
+                    .ok_or(EditError::UnknownStep {
+                        section: *section,
+                        step: *step,
+                    })?;
+                let before = page.clone();
+                page.steps.remove(at);
+                prune_step(page, *step);
+                let after = page.clone();
+                Ok(Edit::SfcPage {
+                    section: *section,
+                    before: Some(before),
+                    after: Some(after),
+                })
+            }
+            Command::MoveStep {
+                section,
+                step,
+                x,
+                y,
+            } => {
+                let position = self.require_section(*section)?;
+                let page = self.page_at(position, *section)?;
+                let at = page
+                    .steps
+                    .iter()
+                    .position(|entry| entry.number == *step)
+                    .ok_or(EditError::UnknownStep {
+                        section: *section,
+                        step: *step,
+                    })?;
+                let Some(before) = page.steps.get(at).cloned() else {
+                    return Err(EditError::UnknownStep {
+                        section: *section,
+                        step: *step,
+                    });
+                };
+                if (before.x == *x && before.y == *y) || cell_occupied(page, *x, *y) {
+                    return Err(EditError::SfcCellOccupied {
+                        section: *section,
+                        x: *x,
+                        y: *y,
+                    });
+                }
+                if let Some(slot) = page.steps.get_mut(at) {
+                    slot.x = *x;
+                    slot.y = *y;
+                }
+                let Some(after) = page.steps.get(at).cloned() else {
+                    return Err(EditError::UnknownStep {
+                        section: *section,
+                        step: *step,
+                    });
+                };
+                Ok(Edit::SfcStep {
+                    section: *section,
+                    index: at,
+                    before,
+                    after,
+                })
+            }
+            Command::SetStepNumber {
+                section,
+                step,
+                number,
+            } => {
+                let position = self.require_section(*section)?;
+                if self.step_number_taken(*section, *number) {
+                    return Err(EditError::DuplicateStep(*number));
+                }
+                let page = self.page_at(position, *section)?;
+                let at = page
+                    .steps
+                    .iter()
+                    .position(|entry| entry.number == *step)
+                    .ok_or(EditError::UnknownStep {
+                        section: *section,
+                        step: *step,
+                    })?;
+                if *number != *step && page.step(*number).is_some() {
+                    return Err(EditError::DuplicateStep(*number));
+                }
+                let before = page.clone();
+                if let Some(slot) = page.steps.get_mut(at) {
+                    slot.number = *number;
+                }
+                // The number is the index of `%X<n>`, so every transition that
+                // named the step follows it rather than dangling.
+                for transition in &mut page.transitions {
+                    for entry in transition.from.iter_mut().chain(transition.to.iter_mut()) {
+                        if *entry == *step {
+                            *entry = *number;
+                        }
+                    }
+                }
+                let after = page.clone();
+                Ok(Edit::SfcPage {
+                    section: *section,
+                    before: Some(before),
+                    after: Some(after),
+                })
+            }
+            Command::SetStepInitial {
+                section,
+                step,
+                initial,
+            } => self.edit_step(*section, *step, |entry| entry.is_initial = *initial),
+            Command::InsertTransition {
+                section,
+                transition,
+            } => {
+                let position = self.require_section(*section)?;
+                if self.transition_number_taken(*section, transition.number) {
+                    return Err(EditError::DuplicateTransition(transition.number));
+                }
+                let page = self.page_at(position, *section)?;
+                let replacing = page.transition(transition.number).is_some_and(|existing| {
+                    existing.x == transition.x && existing.y == transition.y
+                });
+                if page.transition(transition.number).is_some() && !replacing {
+                    return Err(EditError::DuplicateTransition(transition.number));
+                }
+                let displaced = steps_at_cell(page, transition.x, transition.y);
+                for number in transition.from.iter().chain(transition.to.iter()) {
+                    // A step the placement itself displaces cannot be named: it
+                    // would be pruned again by the clear below.
+                    if page.step(*number).is_none() || displaced.contains(number) {
+                        return Err(EditError::UnknownStep {
+                            section: *section,
+                            step: *number,
+                        });
+                    }
+                }
+                let before = page.clone();
+                let removed = clear_cell(page, transition.x, transition.y, None);
+                for number in removed {
+                    prune_step(page, number);
+                }
+                let mut inserted = transition.clone();
+                inserted.from = sorted_set(&inserted.from);
+                inserted.to = sorted_set(&inserted.to);
+                page.transitions.push(inserted);
+                sort_page(page);
+                let after = page.clone();
+                Ok(Edit::SfcPage {
+                    section: *section,
+                    before: Some(before),
+                    after: Some(after),
+                })
+            }
+            Command::RemoveTransition {
+                section,
+                transition,
+            } => {
+                let position = self.require_section(*section)?;
+                let page = self.page_at(position, *section)?;
+                let at = page
+                    .transitions
+                    .iter()
+                    .position(|entry| entry.number == *transition)
+                    .ok_or(EditError::UnknownTransition {
+                        section: *section,
+                        transition: *transition,
+                    })?;
+                let before = page.clone();
+                page.transitions.remove(at);
+                let after = page.clone();
+                Ok(Edit::SfcPage {
+                    section: *section,
+                    before: Some(before),
+                    after: Some(after),
+                })
+            }
+            Command::MoveTransition {
+                section,
+                transition,
+                x,
+                y,
+            } => {
+                let position = self.require_section(*section)?;
+                let page = self.page_at(position, *section)?;
+                let at = page
+                    .transitions
+                    .iter()
+                    .position(|entry| entry.number == *transition)
+                    .ok_or(EditError::UnknownTransition {
+                        section: *section,
+                        transition: *transition,
+                    })?;
+                let Some(before) = page.transitions.get(at).cloned() else {
+                    return Err(EditError::UnknownTransition {
+                        section: *section,
+                        transition: *transition,
+                    });
+                };
+                if (before.x == *x && before.y == *y) || cell_occupied(page, *x, *y) {
+                    return Err(EditError::SfcCellOccupied {
+                        section: *section,
+                        x: *x,
+                        y: *y,
+                    });
+                }
+                if let Some(slot) = page.transitions.get_mut(at) {
+                    slot.x = *x;
+                    slot.y = *y;
+                }
+                let Some(after) = page.transitions.get(at).cloned() else {
+                    return Err(EditError::UnknownTransition {
+                        section: *section,
+                        transition: *transition,
+                    });
+                };
+                Ok(Edit::SfcTransition {
+                    section: *section,
+                    index: at,
+                    before,
+                    after,
+                })
+            }
+            Command::SetTransitionCondition {
+                section,
+                transition,
+                condition,
+            } => {
+                let parsed = parse_condition(condition.as_deref())?;
+                self.edit_transition(*section, *transition, |entry| entry.condition = parsed)
+            }
+            Command::SetTransitionFrom {
+                section,
+                transition,
+                from,
+            } => {
+                let set = sorted_set(from);
+                self.require_steps(*section, &set)?;
+                self.edit_transition(*section, *transition, |entry| entry.from = set)
+            }
+            Command::SetTransitionTo {
+                section,
+                transition,
+                to,
+            } => {
+                let set = sorted_set(to);
+                self.require_steps(*section, &set)?;
+                self.edit_transition(*section, *transition, |entry| entry.to = set)
+            }
+            Command::SetPageComment { section, comment } => {
+                let position = self.require_section(*section)?;
+                let page = self.page_at(position, *section)?;
+                let before = page.clone();
+                page.comment = comment.clone();
+                let after = page.clone();
+                Ok(Edit::SfcPage {
+                    section: *section,
+                    before: Some(before),
+                    after: Some(after),
+                })
+            }
+            Command::AddPage { section, page } => {
+                let position = self.require_section(*section)?;
+                let target = self
+                    .project
+                    .sections
+                    .get_mut(position)
+                    .ok_or(EditError::UnknownSection(*section))?;
+                if target.sequential_page.is_some() {
+                    return Err(EditError::PageExists(*section));
+                }
+                target.sequential_page = Some(page.clone());
+                Ok(Edit::SfcPage {
+                    section: *section,
+                    before: None,
+                    after: Some(page.clone()),
+                })
+            }
+            Command::RemovePage { section } => {
+                let position = self.require_section(*section)?;
+                let target = self
+                    .project
+                    .sections
+                    .get_mut(position)
+                    .ok_or(EditError::UnknownSection(*section))?;
+                let before = target
+                    .sequential_page
+                    .take()
+                    .ok_or(EditError::NoSequentialPage(*section))?;
+                Ok(Edit::SfcPage {
+                    section: *section,
+                    before: Some(before),
+                    after: None,
+                })
+            }
         }
+    }
+
+    /// The sequential page of the section at `position`.
+    fn page_at(&mut self, position: usize, section: u32) -> Result<&mut SequentialPage, EditError> {
+        self.project
+            .sections
+            .get_mut(position)
+            .and_then(|target| target.sequential_page.as_mut())
+            .ok_or(EditError::NoSequentialPage(section))
+    }
+
+    /// `true` when a step of another section already uses `number`.
+    ///
+    /// `%X<number>` is one variable in the scan engine, so a step number is
+    /// unique across the whole project and not only inside one page.
+    fn step_number_taken(&self, section: u32, number: u32) -> bool {
+        self.project.sections.iter().any(|entry| {
+            entry.id != section
+                && entry
+                    .sequential_page
+                    .as_ref()
+                    .is_some_and(|page| page.step(number).is_some())
+        })
+    }
+
+    /// `true` when a transition of another section already uses `number`.
+    fn transition_number_taken(&self, section: u32, number: u32) -> bool {
+        self.project.sections.iter().any(|entry| {
+            entry.id != section
+                && entry
+                    .sequential_page
+                    .as_ref()
+                    .is_some_and(|page| page.transition(number).is_some())
+        })
+    }
+
+    /// Validates that every number in `steps` names a step of the page.
+    fn require_steps(&self, section: u32, steps: &[u32]) -> Result<(), EditError> {
+        let position = self.require_section(section)?;
+        let page = self
+            .project
+            .sections
+            .get(position)
+            .and_then(|entry| entry.sequential_page.as_ref())
+            .ok_or(EditError::NoSequentialPage(section))?;
+        match steps.iter().find(|number| page.step(**number).is_none()) {
+            Some(number) => Err(EditError::UnknownStep {
+                section,
+                step: *number,
+            }),
+            None => Ok(()),
+        }
+    }
+
+    /// Applies `mutate` to one step of a section's page and snapshots it.
+    fn edit_step(
+        &mut self,
+        section: u32,
+        step: u32,
+        mutate: impl FnOnce(&mut Step),
+    ) -> Result<Edit, EditError> {
+        let position = self.require_section(section)?;
+        let page = self.page_at(position, section)?;
+        let at = page
+            .steps
+            .iter()
+            .position(|entry| entry.number == step)
+            .ok_or(EditError::UnknownStep { section, step })?;
+        let Some(before) = page.steps.get(at).cloned() else {
+            return Err(EditError::UnknownStep { section, step });
+        };
+        if let Some(slot) = page.steps.get_mut(at) {
+            mutate(slot);
+        }
+        let Some(after) = page.steps.get(at).cloned() else {
+            return Err(EditError::UnknownStep { section, step });
+        };
+        Ok(Edit::SfcStep {
+            section,
+            index: at,
+            before,
+            after,
+        })
+    }
+
+    /// Applies `mutate` to one transition of a section's page and snapshots it.
+    fn edit_transition(
+        &mut self,
+        section: u32,
+        transition: u32,
+        mutate: impl FnOnce(&mut Transition),
+    ) -> Result<Edit, EditError> {
+        let position = self.require_section(section)?;
+        let page = self.page_at(position, section)?;
+        let at = page
+            .transitions
+            .iter()
+            .position(|entry| entry.number == transition)
+            .ok_or(EditError::UnknownTransition {
+                section,
+                transition,
+            })?;
+        let Some(before) = page.transitions.get(at).cloned() else {
+            return Err(EditError::UnknownTransition {
+                section,
+                transition,
+            });
+        };
+        if let Some(slot) = page.transitions.get_mut(at) {
+            mutate(slot);
+        }
+        let Some(after) = page.transitions.get(at).cloned() else {
+            return Err(EditError::UnknownTransition {
+                section,
+                transition,
+            });
+        };
+        Ok(Edit::SfcTransition {
+            section,
+            index: at,
+            before,
+            after,
+        })
     }
 }
 
@@ -892,6 +1644,90 @@ impl Editor {
 fn sort_elements(rung: &mut Rung) {
     rung.elements
         .sort_by_key(|element| (element.row, element.col));
+}
+
+/// Keeps a page's steps and transitions in a canonical `(y, x)` order.
+///
+/// Same reasoning as [`sort_elements`]: the drawing reads positions, not
+/// sequence, so the stored order is free and a stable one keeps a saved project
+/// from depending on the order the user happened to click in.
+fn sort_page(page: &mut SequentialPage) {
+    page.steps.sort_by_key(|step| (step.y, step.x));
+    page.transitions
+        .sort_by_key(|transition| (transition.y, transition.x));
+}
+
+/// `true` when `(x, y)` of `page` already holds a step or a transition.
+fn cell_occupied(page: &SequentialPage, x: i32, y: i32) -> bool {
+    page.steps.iter().any(|step| step.x == x && step.y == y)
+        || page
+            .transitions
+            .iter()
+            .any(|transition| transition.x == x && transition.y == y)
+}
+
+/// Removes `number` from every `from` and `to` set of `page`.
+fn prune_step(page: &mut SequentialPage, number: u32) {
+    for transition in &mut page.transitions {
+        transition.from.retain(|entry| *entry != number);
+        transition.to.retain(|entry| *entry != number);
+    }
+}
+
+/// The numbers of the steps occupying `(x, y)` of `page`.
+fn steps_at_cell(page: &SequentialPage, x: i32, y: i32) -> Vec<u32> {
+    page.steps
+        .iter()
+        .filter(|step| step.x == x && step.y == y)
+        .map(|step| step.number)
+        .collect()
+}
+
+/// Clears `(x, y)` of `page` and returns the numbers of the steps it removed.
+///
+/// `keep` names a step number that is about to be written back into the cell, so
+/// its references survive the clear; every other displaced step is pruned by the
+/// caller.
+fn clear_cell(page: &mut SequentialPage, x: i32, y: i32, keep: Option<u32>) -> Vec<u32> {
+    let removed: Vec<u32> = page
+        .steps
+        .iter()
+        .filter(|step| step.x == x && step.y == y && Some(step.number) != keep)
+        .map(|step| step.number)
+        .collect();
+    page.steps.retain(|step| step.x != x || step.y != y);
+    page.transitions
+        .retain(|transition| transition.x != x || transition.y != y);
+    removed
+}
+
+/// A step set in the canonical order [`SequentialPage`] stores.
+///
+/// A set is a set: the order it was written in carries no meaning, so it is
+/// sorted and deduplicated before it is stored.
+fn sorted_set(numbers: &[u32]) -> Vec<u32> {
+    let mut set = numbers.to_vec();
+    set.sort_unstable();
+    set.dedup();
+    set
+}
+
+/// Parses the text of a transition condition.
+///
+/// A `None` or blank text clears the condition (the transition then fires
+/// whenever its sources are active); anything else must parse as an expression
+/// the scan engine can evaluate.
+fn parse_condition(text: Option<&str>) -> Result<Option<Expr>, EditError> {
+    match text.map(str::trim) {
+        None | Some("") => Ok(None),
+        Some(text) => text
+            .parse::<Expr>()
+            .map(Some)
+            .map_err(|error| EditError::BadCondition {
+                text: text.to_owned(),
+                message: error.to_string(),
+            }),
+    }
 }
 
 /// Pushes `diagnostic` unless an identical one is already present.

@@ -10,6 +10,8 @@
 //! * [`app::EditorApp`] — view state plus every action, independent of the
 //!   window, which is why the actions are unit-tested.
 //! * [`canvas`] — the rung canvas: grid, power rail, elements, live indication.
+//! * [`sfc`] — the sequential (SFC/Grafcet) document: pages, steps, transitions,
+//!   their derived wiring and the live chart.
 //! * [`palette`] — the element palette and the defaults a placed element gets.
 //! * [`layout`] — cell ↔ pixel mapping and the pan/zoom camera (pure).
 //! * [`shortcuts`] — keyboard → action mapping (pure).
@@ -39,6 +41,7 @@ pub mod layout;
 pub mod palette;
 pub mod panels;
 pub mod queries;
+pub mod sfc;
 pub mod shell;
 pub mod shortcuts;
 pub mod symbols;

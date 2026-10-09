@@ -13,13 +13,17 @@
 //!   the flat rung pool, which is all that is needed to take it out again;
 //! * a delete stores the removed rung plus its two positions;
 //! * a section add/remove stores that section, plus the pool rungs it owned;
+//! * an SFC edit stores the sequential page it touched, or the one step or
+//!   transition that changed in place;
 //! * the symbol table, the panel and the scan config are stored as whole
 //!   before/after values because those commands do replace them wholesale.
 //!
 //! Replay is defensive: a missing rung or section is ignored rather than
 //! panicked on, so a corrupted history can never take the editor down.
 
-use softladder_core::{Project, Rung, ScanConfig, Section, SimulationPanel, Symbol};
+use softladder_core::{
+    Project, Rung, ScanConfig, Section, SequentialPage, SimulationPanel, Step, Symbol, Transition,
+};
 
 /// Direction a recorded edit is replayed in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +102,43 @@ pub(crate) enum Edit {
         before: String,
         /// Name after the command.
         after: String,
+    },
+    /// The sequential page of an SFC section was added, removed or replaced.
+    ///
+    /// A page is a small value — the same order of magnitude as the rung an
+    /// element edit snapshots — so the commands that change its shape (inserting
+    /// or removing a step or a transition, renumbering one, editing its comment,
+    /// adding or removing the page itself) record it whole. The alternative, a
+    /// diff of the two vectors, would be more code for no measurable saving.
+    SfcPage {
+        /// Id of the section that owns the page.
+        section: u32,
+        /// Page before the command; `None` when the section had none.
+        before: Option<SequentialPage>,
+        /// Page after the command; `None` when the command removed it.
+        after: Option<SequentialPage>,
+    },
+    /// One step of a sequential page changed in place.
+    SfcStep {
+        /// Id of the section that owns the page.
+        section: u32,
+        /// Position inside `SequentialPage::steps`.
+        index: usize,
+        /// Step before the command.
+        before: Step,
+        /// Step after the command.
+        after: Step,
+    },
+    /// One transition of a sequential page changed in place.
+    SfcTransition {
+        /// Id of the section that owns the page.
+        section: u32,
+        /// Position inside `SequentialPage::transitions`.
+        index: usize,
+        /// Transition before the command.
+        before: Transition,
+        /// Transition after the command.
+        after: Transition,
     },
     /// The symbol table was replaced.
     Symbols {
@@ -210,6 +251,48 @@ impl Edit {
                     };
                 }
             }
+            Edit::SfcPage {
+                section,
+                before,
+                after,
+            } => {
+                if let Some(target) = section_mut(project, *section) {
+                    target.sequential_page = match direction {
+                        Direction::Undo => before.clone(),
+                        Direction::Redo => after.clone(),
+                    };
+                }
+            }
+            Edit::SfcStep {
+                section,
+                index,
+                before,
+                after,
+            } => {
+                if let Some(page) = page_mut(project, *section) {
+                    if let Some(slot) = page.steps.get_mut(*index) {
+                        *slot = match direction {
+                            Direction::Undo => before.clone(),
+                            Direction::Redo => after.clone(),
+                        };
+                    }
+                }
+            }
+            Edit::SfcTransition {
+                section,
+                index,
+                before,
+                after,
+            } => {
+                if let Some(page) = page_mut(project, *section) {
+                    if let Some(slot) = page.transitions.get_mut(*index) {
+                        *slot = match direction {
+                            Direction::Undo => before.clone(),
+                            Direction::Redo => after.clone(),
+                        };
+                    }
+                }
+            }
             Edit::Symbols { before, after } => {
                 project.symbols = match direction {
                     Direction::Undo => before.clone(),
@@ -235,6 +318,11 @@ impl Edit {
 /// Looks up a section by id, mutably.
 fn section_mut(project: &mut Project, id: u32) -> Option<&mut Section> {
     project.sections.iter_mut().find(|section| section.id == id)
+}
+
+/// Looks up the sequential page of a section by id, mutably.
+fn page_mut(project: &mut Project, id: u32) -> Option<&mut SequentialPage> {
+    section_mut(project, id)?.sequential_page.as_mut()
 }
 
 /// Inserts a rung into the flat pool, clamping the position into range.

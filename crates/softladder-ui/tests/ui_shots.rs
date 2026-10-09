@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 use egui::epaint::{ClippedPrimitive, ImageData, Primitive, TextureId};
 use egui::{Context, RawInput, Rect, Vec2};
 use softladder_ui::app::{CentreTab, EditorApp};
+use softladder_ui::Theme;
 
 /// One decoded texture: premultiplied linear RGBA in `0..=1`.
 struct Texture {
@@ -390,6 +391,178 @@ fn broken_project() -> softladder_core::Project {
     project
 }
 
+/// A project with a ladder section and a sequential chart, for the SFC shots.
+///
+/// The chart is a small conveyor sequence: an initial step, an AND divergence
+/// into two branches, a merge and the loop back, so the shots show the doubled
+/// transition bar, an OR junction and the wiring the editor derives from the
+/// model's `from`/`to` sets.
+fn sfc_project() -> softladder_core::Project {
+    use softladder_core::{
+        Expr, Project, Section, SequentialPage, Step, Symbol, Transition, VarRef,
+    };
+    let var = |text: &str| text.parse::<VarRef>().expect("variable parses");
+    let condition = |text: &str| text.parse::<Expr>().expect("condition parses");
+
+    let mut project = project();
+    let mut page = SequentialPage::new(0, "Conveyor sequence: start, run, stop");
+    page.steps.push(Step {
+        number: 0,
+        is_initial: true,
+        x: 0,
+        y: 0,
+        page: 0,
+    });
+    page.steps.push(Step {
+        number: 1,
+        is_initial: false,
+        x: 0,
+        y: 2,
+        page: 0,
+    });
+    page.steps.push(Step {
+        number: 2,
+        is_initial: false,
+        x: 2,
+        y: 2,
+        page: 0,
+    });
+    page.steps.push(Step {
+        number: 3,
+        is_initial: false,
+        x: 1,
+        y: 4,
+        page: 0,
+    });
+    page.transitions.push(Transition {
+        number: 0,
+        condition: Some(condition("%I0")),
+        from: vec![0],
+        to: vec![1, 2],
+        page: 0,
+        x: 0,
+        y: 1,
+    });
+    page.transitions.push(Transition {
+        number: 1,
+        condition: Some(condition("%I1")),
+        from: vec![1],
+        to: vec![3],
+        page: 0,
+        x: 0,
+        y: 3,
+    });
+    page.transitions.push(Transition {
+        number: 2,
+        condition: Some(condition("%I2 AND %I3")),
+        from: vec![2],
+        to: vec![3],
+        page: 0,
+        x: 2,
+        y: 3,
+    });
+    page.transitions.push(Transition {
+        number: 3,
+        condition: Some(condition("%M0")),
+        from: vec![3],
+        to: vec![0],
+        page: 0,
+        x: 1,
+        y: 5,
+    });
+    project.sections.push(Section::sfc(2, "Conveyor", page));
+    project.symbols.push(Symbol {
+        name: "cycle_done".to_owned(),
+        var: Some(var("%M0")),
+        comment: "One conveyor cycle finished".to_owned(),
+        unit: None,
+    });
+    let _ = Project::new("unused");
+    project
+}
+
+/// A chart broken every way the sequential lint reports.
+///
+/// `SL-W011` (a transition with no condition), `SL-E011` (a transition naming a
+/// step the page does not define), `SL-W001` (a step no transition can activate)
+/// and `SL-W002` (a section with no page) all land in the Problems document, so
+/// the shot covers every code and the location each one carries.
+fn broken_sfc_project() -> softladder_core::Project {
+    use softladder_core::{
+        ElementKind, PlacedElement, Project, Rung, Section, SequentialPage, Step, Transition,
+        VarRef,
+    };
+    let var = |text: &str| text.parse::<VarRef>().expect("variable parses");
+    let mut project = Project::new("broken chart");
+    project.schema_version = 2;
+    let mut main = Section::new(1, "Main");
+    main.rungs.push(1);
+    project.sections.push(main);
+    project.rungs.push(Rung {
+        id: 1,
+        label: "start_stop".to_owned(),
+        elements: vec![PlacedElement::with_var(
+            ElementKind::ContactNo,
+            var("%I0"),
+            0,
+            0,
+        )],
+        ..Rung::new(1)
+    });
+
+    let mut page = SequentialPage::new(0, "start-up");
+    page.steps.push(Step {
+        number: 0,
+        is_initial: true,
+        x: 0,
+        y: 0,
+        page: 0,
+    });
+    page.steps.push(Step {
+        number: 1,
+        is_initial: false,
+        x: 0,
+        y: 2,
+        page: 0,
+    });
+    // A step no transition can activate: `SL-W001`.
+    page.steps.push(Step {
+        number: 2,
+        is_initial: false,
+        x: 2,
+        y: 0,
+        page: 0,
+    });
+    // An unconditional transition, which fires whenever its source is active:
+    // `SL-W011`.
+    page.transitions.push(Transition {
+        number: 0,
+        condition: None,
+        from: vec![0],
+        to: vec![1],
+        page: 0,
+        x: 0,
+        y: 1,
+    });
+    // A transition naming a step that does not exist: `SL-E011`.
+    page.transitions.push(Transition {
+        number: 1,
+        condition: Some("%I0".parse().expect("a condition parses")),
+        from: vec![1],
+        to: vec![9],
+        page: 0,
+        x: 0,
+        y: 3,
+    });
+    project.sections.push(Section::sfc(2, "Conveyor", page));
+
+    // A sequential section whose page has not been drawn: `SL-W002`.
+    let mut empty = Section::new(3, "Manual");
+    empty.language = softladder_core::SectionLanguage::Sfc;
+    project.sections.push(empty);
+    project
+}
+
 #[test]
 fn shoot_the_editor() {
     let dir = output_dir();
@@ -504,4 +677,70 @@ fn shoot_the_editor() {
     app.set_theme(softladder_ui::Theme::Dark);
     app.show_document(CentreTab::Tags);
     shoot(&mut app, size, &dir.join("11-dark.png"));
+
+    // 12. The sequential document: an SFC section selected, with its page band,
+    // the initial step, the AND divergence and the wiring between them. The
+    // ribbon's Insert group shows the chart's own palette.
+    let mut app = EditorApp::new(sfc_project());
+    softladder_ui::sfc::open(&mut app, 1);
+    shoot(&mut app, size, &dir.join("12-sfc-section.png"));
+
+    // 13. Running: the active step filled, its elapsed time, and the transitions
+    // that are ready to fire.
+    let mut app = EditorApp::new(sfc_project());
+    softladder_ui::sfc::open(&mut app, 1);
+    app.handle(softladder_ui::shortcuts::Action::RunStop);
+    for _ in 0..40 {
+        app.single_scan();
+    }
+    // A scan reads its inputs from the operator's panel, so the values the shot
+    // shows are written last, into the same store the document reads.
+    for (text, value) in [("%I0", true), ("%I1", true), ("%I2", false), ("%I3", false)] {
+        let var: softladder_core::VarRef = text.parse().expect("a valid variable");
+        app.set_variable(&var, softladder_core::Value::Bit(value))
+            .expect("the store accepts inputs");
+    }
+    shoot(&mut app, size, &dir.join("13-sfc-running.png"));
+
+    // 14. A transition selected: the inspector shows its condition, the AND
+    // badge and the steps it deactivates and activates.
+    let mut app = EditorApp::new(sfc_project());
+    softladder_ui::sfc::open(&mut app, 1);
+    softladder_ui::sfc::focus(
+        &mut app,
+        0,
+        Some(softladder_ui::sfc::Selection::Transition(0)),
+    );
+    shoot(&mut app, size, &dir.join("14-sfc-inspector.png"));
+
+    // 14b. A step selected, with its number, its initial flag and its cell.
+    let mut app = EditorApp::new(sfc_project());
+    softladder_ui::sfc::open(&mut app, 1);
+    softladder_ui::sfc::focus(&mut app, 0, Some(softladder_ui::sfc::Selection::Step(2)));
+    shoot(&mut app, size, &dir.join("14b-sfc-step.png"));
+
+    // 15. The chart's diagnostics: `SL-W002`, `SL-W001`, `SL-W011` and `SL-E011`
+    // land in the Problems document with a page-and-element location.
+    let mut app = EditorApp::new(broken_sfc_project());
+    for code in ["SL-W002", "SL-W001", "SL-W011", "SL-E011"] {
+        assert!(
+            app.editor().problems().iter().any(|d| d.code == code),
+            "the broken chart must report {code}: {:?}",
+            app.editor().problems()
+        );
+    }
+    app.show_document(CentreTab::Problems);
+    shoot(&mut app, size, &dir.join("15-sfc-problems.png"));
+
+    // 16. The dark theme on the sequential document, with the AND divergence
+    // armed so the selected palette chip is visible too.
+    let mut app = EditorApp::new(sfc_project());
+    softladder_ui::sfc::open(&mut app, 1);
+    softladder_ui::sfc::arm(
+        &mut app,
+        Some(softladder_ui::palette::SfcTool::AndDivergence),
+    );
+    app.set_theme(Theme::Dark);
+    shoot(&mut app, size, &dir.join("16-sfc-dark.png"));
+    softladder_ui::sfc::reset_view();
 }

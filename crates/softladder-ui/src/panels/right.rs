@@ -69,6 +69,14 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            // A sequential section has its own inspector: the selected step, the
+            // selected transition or the page. It is checked first because an SFC
+            // document has no rungs and no bench widget, so nothing below could
+            // describe what the user clicked.
+            if crate::sfc::is_sfc(app.project(), app.selected_section) {
+                crate::sfc::inspector(app, ui);
+                return;
+            }
             if app.centre_tab == crate::app::CentreTab::Bench && bench::selected_widget().is_some()
             {
                 bench_widget(app, ui);

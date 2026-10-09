@@ -9,6 +9,7 @@ use egui::{Align, Layout, RichText, Ui};
 use crate::app::{CentreTab, EditorApp};
 use crate::design::{quiet_pill, rule, TypeScale, SPACE_1, SPACE_2, SPACE_3};
 use crate::shortcuts::Action;
+
 use crate::{canvas, panels};
 
 /// The menu bar and the command groups under it.
@@ -90,7 +91,14 @@ pub fn ribbon(app: &mut EditorApp, ui: &mut Ui) {
                     .size(TypeScale::CAPTION)
                     .color(tokens.text_dim),
             );
-            panels::palette::show(app, ui);
+            // The instruction set follows the language of the open section: the
+            // ladder palette for a ladder section, the chart's tools for an SFC
+            // one.
+            if crate::sfc::is_sfc(app.project(), app.selected_section) {
+                crate::sfc::palette(app, ui);
+            } else {
+                panels::palette::show(app, ui);
+            }
         });
     });
     ui.add_space(SPACE_1);
@@ -297,8 +305,12 @@ pub fn centre(app: &mut EditorApp, ui: &mut Ui) {
     rule(ui, &tokens);
     match app.centre_tab {
         CentreTab::Ladder => {
-            panels::properties::show(app, ui);
-            rule(ui, &tokens);
+            // The property strip edits the selected *ladder* element; an SFC
+            // section has its own inspector in the right-hand pane.
+            if !crate::sfc::is_sfc(app.project(), app.selected_section) {
+                panels::properties::show(app, ui);
+                rule(ui, &tokens);
+            }
             canvas::show(app, ui);
         }
         CentreTab::Tags => panels::tags::show(app, ui),

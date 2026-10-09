@@ -5,7 +5,8 @@
 //! "Undo <label>" / "Redo <label>" menu entries.
 
 use softladder_core::{
-    ElementKind, PlacedElement, Rung, ScanConfig, Section, SimulationPanel, Symbol, VarRef,
+    ElementKind, PlacedElement, Rung, ScanConfig, Section, SequentialPage, SimulationPanel, Step,
+    Symbol, Transition, VarRef,
 };
 
 /// A single reversible edit.
@@ -165,6 +166,136 @@ pub enum Command {
         /// New configuration.
         scan: ScanConfig,
     },
+    /// Inserts a caller-provided step into a section's sequential page.
+    ///
+    /// The step carries its own page, number and `(x, y)` cell; whatever already
+    /// occupies that cell is replaced, so palette placement is a single undo
+    /// step, exactly like [`Command::ReplaceElement`] on the ladder.
+    InsertStep {
+        /// Id of the section to edit.
+        section: u32,
+        /// The step to insert; its number must be unused.
+        step: Step,
+    },
+    /// Removes a step from a section's sequential page.
+    ///
+    /// Every transition that named the step in its `from` or `to` set is pruned
+    /// with it, so removing a step never leaves a dangling reference behind.
+    RemoveStep {
+        /// Id of the section to edit.
+        section: u32,
+        /// Number of the step to remove.
+        step: u32,
+    },
+    /// Moves a step to another cell of its page.
+    MoveStep {
+        /// Id of the section to edit.
+        section: u32,
+        /// Number of the step to move.
+        step: u32,
+        /// New X coordinate.
+        x: i32,
+        /// New Y coordinate.
+        y: i32,
+    },
+    /// Renumbers a step, and every reference the transitions make to it.
+    SetStepNumber {
+        /// Id of the section to edit.
+        section: u32,
+        /// Current number of the step.
+        step: u32,
+        /// Number it should have.
+        number: u32,
+    },
+    /// Sets whether a step is active at start-up.
+    SetStepInitial {
+        /// Id of the section to edit.
+        section: u32,
+        /// Number of the step.
+        step: u32,
+        /// New value of the step's initial flag.
+        initial: bool,
+    },
+    /// Inserts a caller-provided transition into a section's sequential page.
+    ///
+    /// The caller fills in `from` and `to`, which is how a placement that also
+    /// links the surrounding steps stays a single undo step.
+    InsertTransition {
+        /// Id of the section to edit.
+        section: u32,
+        /// The transition to insert; its number must be unused.
+        transition: Transition,
+    },
+    /// Removes a transition from a section's sequential page.
+    RemoveTransition {
+        /// Id of the section to edit.
+        section: u32,
+        /// Number of the transition to remove.
+        transition: u32,
+    },
+    /// Moves a transition to another cell of its page.
+    MoveTransition {
+        /// Id of the section to edit.
+        section: u32,
+        /// Number of the transition to move.
+        transition: u32,
+        /// New X coordinate.
+        x: i32,
+        /// New Y coordinate.
+        y: i32,
+    },
+    /// Sets or clears a transition's firing condition.
+    ///
+    /// The text is parsed with `softladder_core::parse`; `None` and a blank
+    /// string both clear the condition, which makes the transition fire whenever
+    /// all of its source steps are active. Text that does not parse is refused
+    /// with [`EditError::BadCondition`](crate::EditError::BadCondition) before
+    /// anything is changed.
+    SetTransitionCondition {
+        /// Id of the section to edit.
+        section: u32,
+        /// Number of the transition.
+        transition: u32,
+        /// Expression source, or `None` to clear it.
+        condition: Option<String>,
+    },
+    /// Replaces the steps a transition requires to be active before it fires.
+    SetTransitionFrom {
+        /// Id of the section to edit.
+        section: u32,
+        /// Number of the transition.
+        transition: u32,
+        /// Step numbers; every one of them must be active. Sorted and deduplicated.
+        from: Vec<u32>,
+    },
+    /// Replaces the steps a transition activates when it fires.
+    SetTransitionTo {
+        /// Id of the section to edit.
+        section: u32,
+        /// Number of the transition.
+        transition: u32,
+        /// Step numbers; all of them are activated together. Sorted and deduplicated.
+        to: Vec<u32>,
+    },
+    /// Replaces an SFC page's comment.
+    SetPageComment {
+        /// Id of the section to edit.
+        section: u32,
+        /// New comment.
+        comment: String,
+    },
+    /// Gives an SFC section its page.
+    AddPage {
+        /// Id of the section to edit.
+        section: u32,
+        /// The page to install; its steps and transitions are taken as they are.
+        page: SequentialPage,
+    },
+    /// Removes an SFC section's page, and every step and transition it held.
+    RemovePage {
+        /// Id of the section to edit.
+        section: u32,
+    },
 }
 
 impl Command {
@@ -189,6 +320,20 @@ impl Command {
             Command::SetSymbols { .. } => "set symbols",
             Command::SetPanel { .. } => "set simulation panel",
             Command::SetScanConfig { .. } => "set scan configuration",
+            Command::InsertStep { .. } => "insert step",
+            Command::RemoveStep { .. } => "delete step",
+            Command::MoveStep { .. } => "move step",
+            Command::SetStepNumber { .. } => "renumber step",
+            Command::SetStepInitial { .. } => "set the initial step",
+            Command::InsertTransition { .. } => "insert transition",
+            Command::RemoveTransition { .. } => "delete transition",
+            Command::MoveTransition { .. } => "move transition",
+            Command::SetTransitionCondition { .. } => "set the transition condition",
+            Command::SetTransitionFrom { .. } => "set the transition sources",
+            Command::SetTransitionTo { .. } => "set the transition targets",
+            Command::SetPageComment { .. } => "edit the page comment",
+            Command::AddPage { .. } => "add a page",
+            Command::RemovePage { .. } => "remove the page",
         }
     }
 }
@@ -331,12 +476,113 @@ mod tests {
                 },
                 "set scan configuration",
             ),
+            (
+                Command::InsertStep {
+                    section: 1,
+                    step: Step::new(1, 0),
+                },
+                "insert step",
+            ),
+            (
+                Command::RemoveStep {
+                    section: 1,
+                    step: 1,
+                },
+                "delete step",
+            ),
+            (
+                Command::MoveStep {
+                    section: 1,
+                    step: 1,
+                    x: 2,
+                    y: 3,
+                },
+                "move step",
+            ),
+            (
+                Command::SetStepNumber {
+                    section: 1,
+                    step: 1,
+                    number: 4,
+                },
+                "renumber step",
+            ),
+            (
+                Command::SetStepInitial {
+                    section: 1,
+                    step: 1,
+                    initial: true,
+                },
+                "set the initial step",
+            ),
+            (
+                Command::InsertTransition {
+                    section: 1,
+                    transition: Transition::new(1, 0),
+                },
+                "insert transition",
+            ),
+            (
+                Command::RemoveTransition {
+                    section: 1,
+                    transition: 1,
+                },
+                "delete transition",
+            ),
+            (
+                Command::MoveTransition {
+                    section: 1,
+                    transition: 1,
+                    x: 0,
+                    y: 1,
+                },
+                "move transition",
+            ),
+            (
+                Command::SetTransitionCondition {
+                    section: 1,
+                    transition: 1,
+                    condition: None,
+                },
+                "set the transition condition",
+            ),
+            (
+                Command::SetTransitionFrom {
+                    section: 1,
+                    transition: 1,
+                    from: vec![1],
+                },
+                "set the transition sources",
+            ),
+            (
+                Command::SetTransitionTo {
+                    section: 1,
+                    transition: 1,
+                    to: vec![2],
+                },
+                "set the transition targets",
+            ),
+            (
+                Command::SetPageComment {
+                    section: 1,
+                    comment: "loop".to_owned(),
+                },
+                "edit the page comment",
+            ),
+            (
+                Command::AddPage {
+                    section: 1,
+                    page: SequentialPage::new(0, "main"),
+                },
+                "add a page",
+            ),
+            (Command::RemovePage { section: 1 }, "remove the page"),
         ];
 
         for (command, expected) in &commands {
             assert_eq!(label(command), *expected);
             assert!(!expected.is_empty());
         }
-        assert_eq!(commands.len(), 17, "one label per command variant");
+        assert_eq!(commands.len(), 31, "one label per command variant");
     }
 }

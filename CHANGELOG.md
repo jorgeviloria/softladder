@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — the SFC editor
+
+### Added
+
+- **The sequential document.** An `Sfc` section opens a chart editor in the centre pane: the page on
+  the same paper as the ladder, with a square coarse grid and one band per page (number, comment and
+  a state badge from the diagnostics). Steps are squares — the initial one with a doubled border and
+  an `init` chip, the active one filled in `tokens.energised` with its `%X<n>.V` time on a chip —
+  and transitions are a bar crossed by the IEC mark with their condition beside it (tag over address,
+  or the monospace expression, `always` when unconditional). Links are **derived from the model**
+  (orthogonal runs, idle/energised strokes), never placed by hand, and a junction of more than one
+  source or target is drawn with the **double bar**.
+- **Fourteen undoable chart commands** in `softladder-edit`: insert/remove/move a step, set its
+  number or its initial flag, insert/remove/move a transition, set its condition (parsed, refused
+  with the reason), add or remove a step from its source/target sets, edit the page comment, and add
+  or remove the page. Each validates before mutating, records one undo entry, replays defensively,
+  and a property test proves that any sequence of them undoes and redoes exactly (it found a real
+  dangling-reference bug on its first run).
+- **A sequential palette** in the ribbon's Insert group (Select, Init, Step, Trans, Link, AND, OR,
+  Note) that replaces the ladder's when the open section is a chart, with a ghost while placing, a
+  context menu, `Del`/arrows/`Esc`, wheel zoom and pan.
+- **Tree and inspector.** The project tree lists a chart's pages, steps (`0 · initial`) and
+  transitions (`T0 %I0`) instead of rungs; the inspector edits the page (comment, counts), a step
+  (number with inline validation, initial flag, position, live activity and timer) and a transition
+  (condition with the ladder's validation and tag picker, plus per-step *deactivates*/*activates*
+  checkboxes and the AND/OR badge).
+- Clicking a chart diagnostic in Problems opens its page and selects the element it names.
+
 ## [Unreleased] — function block pins
 
 ### Fixed

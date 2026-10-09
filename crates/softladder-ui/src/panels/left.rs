@@ -20,11 +20,13 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 
 use egui::{Align, Layout, RichText, Sense, Ui};
-use softladder_core::{Diagnostic, Project, SectionLanguage, Severity, VarRef};
+use softladder_core::{Diagnostic, Project, Section, SectionLanguage, Severity, VarRef};
 
 use crate::app::{CentreTab, EditorApp};
 use crate::design::{section_header, Tokens, TypeScale, SPACE_1, SPACE_2};
+use crate::palette::SfcTool;
 use crate::panels::icons::{self, Icon};
+use crate::panels::problems::{self, SfcElement};
 use crate::queries;
 
 // Which project-tree nodes are folded shut.
@@ -44,8 +46,14 @@ pub enum Node {
     Program,
     /// A section, with the language it is written in.
     Section,
-    /// A rung inside a section.
+    /// A rung inside a ladder section.
     Rung,
+    /// A page of a sequential section.
+    Page,
+    /// A step of a sequential page.
+    Step,
+    /// A transition of a sequential page.
+    Transition,
     /// The PLC tag table.
     Tags,
     /// The simulation bench.
@@ -59,16 +67,23 @@ pub enum Node {
 impl Node {
     /// Whether the node can be expanded and collapsed.
     pub fn is_expandable(self) -> bool {
-        matches!(self, Node::Plc | Node::Program | Node::Section)
+        matches!(self, Node::Plc | Node::Program | Node::Section | Node::Page)
     }
 
     /// A stable identity for the node, for the expansion set.
+    ///
+    /// A page is identified by its section *and* its page number, because two
+    /// sections may both hold a page 0; the caller encodes the pair into `index`
+    /// with [`page_key`].
     pub fn key(self, index: usize) -> u64 {
         match self {
             Node::Plc => 1,
             Node::Program => 2,
             Node::Section => 0x10_0000 + index as u64,
             Node::Rung => 0x20_0000 + index as u64,
+            Node::Page => 0x30_0000 + index as u64,
+            Node::Step => 0x40_0000 + index as u64,
+            Node::Transition => 0x50_0000 + index as u64,
             Node::Tags => 3,
             Node::Bench => 4,
             Node::Watch => 5,
@@ -77,15 +92,30 @@ impl Node {
     }
 }
 
+/// The expansion key of a page: its section index and its page number.
+///
+/// A page number alone is not unique across sections, and the expansion set is
+/// keyed by one integer, so the pair is packed into one. `4096` is far above any
+/// page number a chart stores.
+pub fn page_key(section: usize, page: u32) -> usize {
+    section.saturating_mul(4096).saturating_add(page as usize)
+}
+
 /// One row of the project tree, as [`tree`] produces it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeRow {
     /// What the row is.
     pub node: Node,
-    /// Index of the owning section, for a section or rung row.
+    /// Index of the owning section, for a section, rung, page or element row.
     pub section: Option<usize>,
     /// Id of the rung, for a rung row.
     pub rung: Option<u32>,
+    /// Page number, for a sequential row.
+    pub page: Option<u32>,
+    /// Number of the step, for a step row.
+    pub step: Option<u32>,
+    /// Number of the transition, for a transition row.
+    pub transition: Option<u32>,
     /// Nesting depth, `0` for the root.
     pub depth: usize,
     /// The text drawn on the row.
@@ -164,11 +194,15 @@ pub fn tree(
     problems: &[Diagnostic],
     collapsed_probe: impl Fn(Node, usize) -> bool,
 ) -> Vec<TreeRow> {
+    let collapsed_probe = &collapsed_probe;
     let root_collapsed = collapsed_probe(Node::Plc, 0);
     let mut rows = vec![TreeRow {
         node: Node::Plc,
         section: None,
         rung: None,
+        page: None,
+        step: None,
+        transition: None,
         depth: 0,
         text: if project.name.trim().is_empty() {
             "SoftLadder PLC".to_owned()
@@ -190,6 +224,9 @@ pub fn tree(
         node: Node::Program,
         section: None,
         rung: None,
+        page: None,
+        step: None,
+        transition: None,
         depth: 1,
         text: "Program".to_owned(),
         comment: String::new(),
@@ -201,6 +238,17 @@ pub fn tree(
 
     if !program_collapsed {
         for (index, section) in project.sections.iter().enumerate() {
+            if section.language == SectionLanguage::Sfc {
+                sequential_rows(
+                    project,
+                    problems,
+                    collapsed_probe,
+                    index,
+                    section,
+                    &mut rows,
+                );
+                continue;
+            }
             let rungs = queries::section_rungs(project, index);
             let errors: usize = rungs
                 .iter()
@@ -211,6 +259,9 @@ pub fn tree(
                 node: Node::Section,
                 section: Some(index),
                 rung: None,
+                page: None,
+                step: None,
+                transition: None,
                 depth: 2,
                 text: section.name.clone(),
                 comment: language_label(section.language).to_owned(),
@@ -232,6 +283,9 @@ pub fn tree(
                     node: Node::Rung,
                     section: Some(index),
                     rung: Some(*rung),
+                    page: None,
+                    step: None,
+                    transition: None,
                     depth: 3,
                     text: rung_title(position, &label),
                     comment: truncate(&comment, 40),
@@ -276,6 +330,9 @@ fn document_row(node: Node, text: &str, count: usize, errors: Option<usize>) -> 
         node,
         section: None,
         rung: None,
+        page: None,
+        step: None,
+        transition: None,
         depth: 1,
         text: text.to_owned(),
         comment: String::new(),
@@ -284,6 +341,204 @@ fn document_row(node: Node, text: &str, count: usize, errors: Option<usize>) -> 
         expandable: false,
         collapsed: false,
     }
+}
+
+/// The pages of a sequential section, with their steps and transitions.
+///
+/// `docs/UX.md` §12: a sequential section shows its pages where a ladder section
+/// shows its rungs, so the tree is the same map of the program in both languages.
+/// A section whose page has not been drawn yet shows no children at all — the
+/// document in the middle is where its "Add a page" state lives.
+fn sequential_rows(
+    project: &Project,
+    problems: &[Diagnostic],
+    collapsed_probe: &dyn Fn(Node, usize) -> bool,
+    index: usize,
+    section: &Section,
+    rows: &mut Vec<TreeRow>,
+) {
+    let Some(page) = section.sequential_page.as_ref() else {
+        rows.push(TreeRow {
+            node: Node::Section,
+            section: Some(index),
+            rung: None,
+            page: None,
+            step: None,
+            transition: None,
+            depth: 2,
+            text: section.name.clone(),
+            comment: language_label(section.language).to_owned(),
+            count: Some(0),
+            errors: None,
+            expandable: true,
+            collapsed: collapsed_probe(Node::Section, index),
+        });
+        return;
+    };
+
+    let numbers = page_numbers(page);
+    let collapsed = collapsed_probe(Node::Section, index);
+    let errors = sequential_errors(problems, index, None, None);
+    rows.push(TreeRow {
+        node: Node::Section,
+        section: Some(index),
+        rung: None,
+        page: None,
+        step: None,
+        transition: None,
+        depth: 2,
+        text: section.name.clone(),
+        comment: language_label(section.language).to_owned(),
+        count: Some(numbers.len()),
+        errors: (errors > 0).then_some(errors),
+        expandable: true,
+        collapsed,
+    });
+    if collapsed {
+        return;
+    }
+
+    for number in numbers {
+        let steps: Vec<&softladder_core::Step> = page
+            .steps
+            .iter()
+            .filter(|step| step.page == number)
+            .collect();
+        let transitions: Vec<&softladder_core::Transition> = page
+            .transitions
+            .iter()
+            .filter(|transition| transition.page == number)
+            .collect();
+        let page_collapsed = collapsed_probe(Node::Page, page_key(index, number));
+        let count = steps.len() + transitions.len();
+        let page_errors = sequential_errors(problems, index, Some(number), None);
+        let comment = if number == page.number {
+            page.comment.clone()
+        } else {
+            String::new()
+        };
+        rows.push(TreeRow {
+            node: Node::Page,
+            section: Some(index),
+            rung: None,
+            page: Some(number),
+            step: None,
+            transition: None,
+            depth: 3,
+            text: format!("Page {number}"),
+            comment: truncate(&comment, 20),
+            count: Some(count),
+            errors: (page_errors > 0).then_some(page_errors),
+            expandable: true,
+            collapsed: page_collapsed,
+        });
+        if page_collapsed {
+            continue;
+        }
+        for step in steps {
+            let errors = sequential_errors(
+                problems,
+                index,
+                Some(number),
+                Some(SfcElement::Step(step.number)),
+            );
+            rows.push(TreeRow {
+                node: Node::Step,
+                section: Some(index),
+                rung: None,
+                page: Some(number),
+                step: Some(step.number),
+                transition: None,
+                depth: 4,
+                text: if step.is_initial {
+                    format!("{} · initial", step.number)
+                } else {
+                    format!("{} step", step.number)
+                },
+                comment: format!("x {} · y {}", step.x, step.y),
+                count: None,
+                errors: (errors > 0).then_some(errors),
+                expandable: false,
+                collapsed: false,
+            });
+        }
+        for transition in transitions {
+            let errors = sequential_errors(
+                problems,
+                index,
+                Some(number),
+                Some(SfcElement::Transition(transition.number)),
+            );
+            let condition = transition
+                .condition
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "always".to_owned());
+            rows.push(TreeRow {
+                node: Node::Transition,
+                section: Some(index),
+                rung: None,
+                page: Some(number),
+                step: None,
+                transition: Some(transition.number),
+                depth: 4,
+                text: format!("T{}", transition.number),
+                comment: truncate(&condition, 40),
+                count: None,
+                errors: (errors > 0).then_some(errors),
+                expandable: false,
+                collapsed: false,
+            });
+        }
+    }
+    let _ = project;
+}
+
+/// Every page number a chart uses, in ascending order.
+fn page_numbers(page: &softladder_core::SequentialPage) -> Vec<u32> {
+    let mut numbers = vec![page.number];
+    for step in &page.steps {
+        if !numbers.contains(&step.page) {
+            numbers.push(step.page);
+        }
+    }
+    for transition in &page.transitions {
+        if !numbers.contains(&transition.page) {
+            numbers.push(transition.page);
+        }
+    }
+    numbers.sort_unstable();
+    numbers
+}
+
+/// The diagnostics that point at a sequential row.
+///
+/// A page is counted when the diagnostic names it, and an element when it names
+/// that element; a section with no page collects its own diagnostics.
+fn sequential_errors(
+    problems: &[Diagnostic],
+    section: usize,
+    page: Option<u32>,
+    element: Option<SfcElement>,
+) -> usize {
+    problems
+        .iter()
+        .filter(|diagnostic| {
+            if diagnostic.section != Some(section) {
+                return false;
+            }
+            let Some(target) = problems::sfc_target_of(diagnostic) else {
+                return false;
+            };
+            match (page, element) {
+                (Some(page), Some(element)) => {
+                    target.page == Some(page) && target.element == Some(element)
+                }
+                (Some(page), None) => target.page == Some(page),
+                _ => true,
+            }
+        })
+        .count()
 }
 
 /// Draws the project tree and the inline editors it opens.
@@ -296,6 +551,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let selected_rung = app.selected_rung;
     let selected_section = app.selected_section;
     let centre_tab = app.centre_tab;
+    let sfc_view = crate::sfc::view();
 
     let mut request = TreeRequest::default();
     egui::ScrollArea::both()
@@ -310,6 +566,23 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 let selected = match row.node {
                     Node::Section => row.section == Some(selected_section),
                     Node::Rung => row.rung.is_some() && row.rung == selected_rung,
+                    Node::Page => {
+                        row.section == Some(selected_section)
+                            && sfc_view.page == row.page
+                            && matches!(
+                                sfc_view.selection,
+                                Some(crate::sfc::Selection::Page(_)) | None
+                            )
+                    }
+                    Node::Step => {
+                        row.section == Some(selected_section)
+                            && sfc_view.selection == row.step.map(crate::sfc::Selection::Step)
+                    }
+                    Node::Transition => {
+                        row.section == Some(selected_section)
+                            && sfc_view.selection
+                                == row.transition.map(crate::sfc::Selection::Transition)
+                    }
                     Node::Tags => centre_tab == CentreTab::Tags,
                     Node::Bench => centre_tab == CentreTab::Bench,
                     Node::Watch => centre_tab == CentreTab::Watch,
@@ -334,6 +607,8 @@ struct TreeRequest {
     toggle: Option<(Node, usize)>,
     select_section: Option<usize>,
     select_rung: Option<u32>,
+    /// A sequential element to open: its section, its page and what to select.
+    select_sequential: Option<(usize, u32, Option<crate::sfc::Selection>)>,
     centre: Option<CentreTab>,
     menu: Option<MenuChoice>,
 }
@@ -391,7 +666,11 @@ impl TreeRequest {
             Some(MenuChoice::DeleteRung { section, rung }) => app.delete_rung(section, rung),
             None => {}
         }
-        if let Some(rung) = self.select_rung {
+        if let Some((section, page, selection)) = self.select_sequential {
+            app.centre_tab = CentreTab::Ladder;
+            app.select_section(section);
+            crate::sfc::focus(app, page, selection);
+        } else if let Some(rung) = self.select_rung {
             app.centre_tab = CentreTab::Ladder;
             app.select_rung(rung, None);
         } else if let Some(index) = self.select_section {
@@ -413,7 +692,10 @@ fn draw_row(
     selected: bool,
     request: &mut TreeRequest,
 ) {
-    let height = if row.node == Node::Rung { 24.0 } else { 26.0 };
+    let height = match row.node {
+        Node::Rung | Node::Step | Node::Transition => 24.0,
+        _ => 26.0,
+    };
     let indent = SPACE_2 + row.depth as f32 * SPACE_2;
     let full = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(egui::vec2(full, height), Sense::click());
@@ -465,7 +747,10 @@ fn draw_row(
             ui.spacing_mut().item_spacing.x = SPACE_1;
             if row.expandable {
                 if chevron(ui, tokens, row.collapsed) {
-                    let index = row.section.unwrap_or(0);
+                    let index = match row.node {
+                        Node::Page => page_key(row.section.unwrap_or(0), row.page.unwrap_or(0)),
+                        _ => row.section.unwrap_or(0),
+                    };
                     request.toggle = Some((row.node, index));
                 }
             } else {
@@ -479,6 +764,28 @@ fn draw_row(
         match row.node {
             Node::Section => request.select_section = row.section,
             Node::Rung => request.select_rung = row.rung,
+            Node::Page => {
+                if let (Some(section), Some(page)) = (row.section, row.page) {
+                    request.select_sequential = Some((section, page, None));
+                }
+            }
+            Node::Step => {
+                if let (Some(section), Some(page), Some(step)) = (row.section, row.page, row.step) {
+                    request.select_sequential =
+                        Some((section, page, Some(crate::sfc::Selection::Step(step))));
+                }
+            }
+            Node::Transition => {
+                if let (Some(section), Some(page), Some(transition)) =
+                    (row.section, row.page, row.transition)
+                {
+                    request.select_sequential = Some((
+                        section,
+                        page,
+                        Some(crate::sfc::Selection::Transition(transition)),
+                    ));
+                }
+            }
             Node::Tags => request.centre = Some(CentreTab::Tags),
             Node::Bench => request.centre = Some(CentreTab::Bench),
             Node::Watch => request.centre = Some(CentreTab::Watch),
@@ -533,6 +840,40 @@ fn draw_row_body(
                 );
             }
         }
+        Node::Page => {
+            row_icon(ui, tokens, Icon::Section);
+            ui.label(RichText::new(&row.text).size(size).color(colour));
+            if !row.comment.is_empty() {
+                ui.label(
+                    RichText::new(&row.comment)
+                        .size(TypeScale::CAPTION)
+                        .color(tokens.text_dim),
+                );
+            }
+        }
+        Node::Step => {
+            sfc_glyph(
+                ui,
+                tokens,
+                if row.text.contains("initial") {
+                    SfcTool::InitialStep
+                } else {
+                    SfcTool::Step
+                },
+            );
+            ui.label(RichText::new(&row.text).size(size).color(colour));
+        }
+        Node::Transition => {
+            sfc_glyph(ui, tokens, SfcTool::Transition);
+            ui.label(RichText::new(&row.text).size(size).color(colour));
+            if !row.comment.is_empty() {
+                ui.label(
+                    RichText::new(&row.comment)
+                        .size(TypeScale::CAPTION)
+                        .color(tokens.text_dim),
+                );
+            }
+        }
         Node::Tags => {
             row_icon(ui, tokens, Icon::Tags);
             ui.label(RichText::new(&row.text).size(size).color(colour));
@@ -551,6 +892,12 @@ fn draw_row_body(
         }
     }
     row_trailing(ui, tokens, row, count);
+}
+
+/// A 12 pt sequential glyph at the left of a row, from the palette's own set.
+fn sfc_glyph(ui: &mut Ui, tokens: &Tokens, tool: SfcTool) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), Sense::hover());
+    crate::sfc::tool_glyph(ui.painter(), rect, tokens, tool);
 }
 
 /// A 12 pt icon at the left of a row.
@@ -967,19 +1314,28 @@ mod tests {
         let nodes = [
             Node::Plc,
             Node::Program,
+            Node::Section,
+            Node::Rung,
+            Node::Page,
+            Node::Step,
+            Node::Transition,
             Node::Tags,
             Node::Bench,
             Node::Watch,
             Node::Problems,
         ];
         let mut keys: Vec<u64> = nodes.iter().map(|node| node.key(0)).collect();
-        keys.push(Node::Section.key(0));
-        keys.push(Node::Rung.key(0));
+        keys.push(Node::Section.key(1));
+        keys.push(Node::Page.key(page_key(1, 0)));
         let count = keys.len();
         keys.sort_unstable();
         keys.dedup();
         assert_eq!(keys.len(), count, "two nodes share an identity");
         assert_ne!(Node::Section.key(0), Node::Section.key(1));
+        assert_ne!(
+            Node::Page.key(page_key(0, 0)),
+            Node::Page.key(page_key(1, 0))
+        );
     }
 
     #[test]
@@ -987,8 +1343,218 @@ mod tests {
         assert!(Node::Plc.is_expandable());
         assert!(Node::Program.is_expandable());
         assert!(Node::Section.is_expandable());
+        assert!(Node::Page.is_expandable());
         assert!(!Node::Rung.is_expandable());
+        assert!(!Node::Step.is_expandable());
+        assert!(!Node::Transition.is_expandable());
         assert!(!Node::Tags.is_expandable());
+    }
+
+    /// A project with a sequential chart: one page, two steps, a transition
+    /// between them and a second step on another page.
+    fn sfc_project() -> Project {
+        use softladder_core::{SequentialPage, Step, Transition};
+        let mut project = project();
+        let mut page = SequentialPage::new(0, "start-up and stop");
+        page.steps.push(Step {
+            number: 0,
+            is_initial: true,
+            x: 0,
+            y: 0,
+            page: 0,
+        });
+        page.steps.push(Step {
+            number: 1,
+            is_initial: false,
+            x: 0,
+            y: 2,
+            page: 0,
+        });
+        page.steps.push(Step {
+            number: 2,
+            is_initial: false,
+            x: 1,
+            y: 0,
+            page: 5,
+        });
+        page.transitions.push(Transition {
+            number: 0,
+            condition: Some("%I0".parse().expect("a condition parses")),
+            from: vec![0],
+            to: vec![1],
+            page: 0,
+            x: 0,
+            y: 1,
+        });
+        if let Some(section) = project.sections.get_mut(1) {
+            section.sequential_page = Some(page);
+        }
+        project
+    }
+
+    /// A diagnostic that points into a sequential chart.
+    fn sfc_problem(page: u32, element: &str) -> Diagnostic {
+        Diagnostic {
+            severity: Severity::Warning,
+            code: "SL-W011",
+            section: Some(1),
+            rung: None,
+            message: format!(
+                "SFC section `Sub` page {page} {element}: no condition, so it fires whenever its \
+                 source steps are active"
+            ),
+        }
+    }
+
+    #[test]
+    fn a_sequential_section_shows_its_pages_instead_of_rungs() {
+        let project = sfc_project();
+        let rows = tree(&project, &[], |_, _| false);
+        let nodes: Vec<Node> = rows.iter().map(|row| row.node).collect();
+        assert_eq!(
+            nodes,
+            vec![
+                Node::Plc,
+                Node::Program,
+                Node::Section,
+                Node::Rung,
+                Node::Rung,
+                Node::Section,
+                Node::Page,
+                Node::Step,
+                Node::Step,
+                Node::Transition,
+                Node::Page,
+                Node::Step,
+                Node::Tags,
+                Node::Bench,
+                Node::Watch,
+                Node::Problems,
+            ]
+        );
+        // The sequential section counts its pages, not its rungs.
+        let section = rows
+            .iter()
+            .find(|row| row.node == Node::Section && row.section == Some(1))
+            .expect("the sequential section");
+        assert_eq!(section.comment, "SFC");
+        assert_eq!(section.count, Some(2), "two pages");
+        // A page names its comment and counts its elements.
+        let first = &rows[6];
+        assert_eq!(first.text, "Page 0");
+        assert_eq!(first.comment, "start-up and stop");
+        assert_eq!(first.count, Some(3));
+        assert_eq!(first.page, Some(0));
+        assert!(first.expandable);
+        // Steps and transitions name their number and cell.
+        assert_eq!(rows[7].text, "0 · initial");
+        assert_eq!(rows[7].step, Some(0));
+        assert_eq!(rows[8].text, "1 step");
+        assert_eq!(rows[8].comment, "x 0 · y 2");
+        assert_eq!(rows[9].text, "T0");
+        assert_eq!(rows[9].transition, Some(0));
+        assert_eq!(rows[9].comment, "%I0");
+        // The second page holds its own step and no comment of its own.
+        assert_eq!(rows[10].text, "Page 5");
+        assert_eq!(rows[10].comment, "");
+        assert_eq!(rows[10].count, Some(1));
+        assert_eq!(rows[11].step, Some(2));
+    }
+
+    #[test]
+    fn sequential_diagnostics_land_on_the_element_they_name() {
+        let project = sfc_project();
+        let problems = vec![sfc_problem(0, "transition 0"), sfc_problem(0, "step 1")];
+        let rows = tree(&project, &problems, |_, _| false);
+        let section = rows
+            .iter()
+            .find(|row| row.node == Node::Section && row.section == Some(1))
+            .expect("the section");
+        assert_eq!(section.errors, Some(2), "both problems belong to it");
+        let page = rows
+            .iter()
+            .find(|row| row.node == Node::Page && row.page == Some(0))
+            .expect("page 0");
+        assert_eq!(page.errors, Some(2));
+        let step = rows
+            .iter()
+            .find(|row| row.node == Node::Step && row.step == Some(1))
+            .expect("step 1");
+        assert_eq!(step.errors, Some(1));
+        let transition = rows
+            .iter()
+            .find(|row| row.node == Node::Transition)
+            .expect("the transition");
+        assert_eq!(transition.errors, Some(1));
+        // The step that was not named stays clean.
+        let other = rows
+            .iter()
+            .find(|row| row.node == Node::Step && row.step == Some(0))
+            .expect("step 0");
+        assert_eq!(other.errors, None);
+        // The transition of the other page is unaffected by page 0's problems.
+        let second = rows
+            .iter()
+            .find(|row| row.node == Node::Page && row.page == Some(5))
+            .expect("page 5");
+        assert_eq!(second.errors, None);
+    }
+
+    #[test]
+    fn folding_a_page_or_a_sequential_section_hides_its_children() {
+        let project = sfc_project();
+        let folded_page = tree(&project, &[], |node, index| {
+            node == Node::Page && index == page_key(1, 0)
+        });
+        assert!(
+            !folded_page
+                .iter()
+                .any(|row| row.node == Node::Step && row.page == Some(0)),
+            "the folded page hides its steps"
+        );
+        assert!(
+            folded_page
+                .iter()
+                .any(|row| row.node == Node::Step && row.page == Some(5)),
+            "the other page stays open"
+        );
+
+        let folded_section = tree(&project, &[], |node, index| {
+            node == Node::Section && index == 1
+        });
+        assert!(!folded_section.iter().any(|row| row.node == Node::Page));
+
+        // A page of two sections is two independently foldable nodes.
+        assert_ne!(page_key(0, 0), page_key(1, 0));
+        assert_eq!(page_key(1, 7), 4096 + 7);
+    }
+
+    #[test]
+    fn a_sequential_section_with_no_page_has_no_children() {
+        let project = project();
+        let rows = tree(&project, &[], |_, _| false);
+        assert!(
+            !rows
+                .iter()
+                .any(|row| { matches!(row.node, Node::Page | Node::Step | Node::Transition) }),
+            "an undrawn chart shows nothing under its section"
+        );
+        let section = rows
+            .iter()
+            .find(|row| row.node == Node::Section && row.section == Some(1))
+            .expect("the sequential section");
+        assert_eq!(section.count, Some(0));
+    }
+
+    #[test]
+    fn drawing_the_tree_of_a_sequential_project_is_panic_free() {
+        let mut app = EditorApp::new(sfc_project());
+        crate::sfc::open(&mut app, 1);
+        crate::sfc::focus(&mut app, 0, Some(crate::sfc::Selection::Step(0)));
+        crate::panels::test_frame(&ctx(), &mut app, TEST_SIZE);
+        crate::sfc::focus(&mut app, 0, Some(crate::sfc::Selection::Transition(0)));
+        crate::panels::test_frame(&ctx(), &mut app, TEST_SIZE);
+        crate::sfc::reset_view();
     }
 
     #[test]

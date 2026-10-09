@@ -274,7 +274,7 @@ Cada hito termina con criterios de aceptación verificables. **M0 ya está ejecu
 | **M1** ✅ | Núcleo: variables v2 con accesores, power flow por columna, FBs completos (temporizadores, contadores, registros), saltos y subrutinas, `lint` estructural, tiempo simulado determinista, migración v1→v2 | 167 tests en verde; el ejemplo se ejecuta por CLI con salida idéntica entre ejecuciones; `lint` sin diagnósticos |
 | **M2** ✅ | Editor egui: paleta de elementos, canvas con power flow en vivo, undo/redo por comandos, banco de simulación persistido, panel de problemas, `softladder-edit` sin UI | El test de aceptación `m2_acceptance.rs` abre el semáforo, lo simula (arranque, enclavamiento, stop, temporizador), lo edita, lo guarda y lo reabre idéntico; 330 tests en verde |
 | **M3** ✅ | Import/export ClassicLadder + corpus dorado | Los 41 proyectos del corpus importan sin pánico (272 rungs, 9.273 elementos); `import → export → import` es punto fijo; la segunda exportación es byte a byte idéntica; las partes no modeladas sobreviven intactas; un test de comportamiento prueba que el temporizador importado recibe su enable con preset y base correctos |
-| **M4** | SFC/Grafcet: ✅ motor de evolución y `sequential.csv`; editor SFC pendiente | 8 gráficos del corpus (73 etapas, 100 transiciones) importan, se ejecutan sin errores y son punto fijo del round-trip; el editor SFC está diseñado en `docs/UX.md` §12 y usa las mismas capturas headless |
+| **M4** | ✅ SFC/Grafcet: modelo, motor de evolución, import/export de `sequential.csv` y editor | 8 gráficos del corpus (73 etapas, 100 transiciones) importan, se ejecutan sin errores y son punto fijo del round-trip; el editor secuencial (documento, paleta, árbol, inspector y diagnósticos clicables) está descrito en `docs/UX.md` §12 y revisado con capturas headless |
 | **M5** | IO: sim scripting, Modbus TCP maestro/esclavo, luego RTU, con mapa configurable | Test de integración con servidor Modbus simulado; esclavo expone el mapa configurado |
 | **M6** | Monitor online + dashboard web + alarmas/journal | Ver y forzar variables desde el navegador; journal consultable; forzado auditado |
 | **M7** | IO físico (gpiod/rppal) + puente LinuxCNC HAL | Ejecución sobre GPIO real en RPi y lectura/escritura de pines HAL |
@@ -371,7 +371,7 @@ secuencial, más el cierre de las divergencias de comportamiento listadas en
 
 ### Deuda declarada que sigue abierta
 
-- **Stubs por hito**: editor SFC (M4, el motor y el `sequential.csv` ya funcionan),
+- **Stubs por hito**: descubrimiento de dispositivos online (M6) y el protocolo de monitor legacy (M7),
   drivers Modbus/GPIO/HAL (M5/M7), servidor del monitor (M6) y Abrir/Guardar en la UI (M2).
 - **Símbolos en la UI**: el modelo ya los enlaza a variables (`Symbol::var`), pero el editor todavía
   no los usa para mostrar nombres en el canvas (M2).

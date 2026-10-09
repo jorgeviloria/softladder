@@ -50,6 +50,52 @@ pub enum EditError {
     /// Another section already uses this id.
     #[error("section id `{0}` is already in use")]
     DuplicateSection(u32),
+    /// The section is a sequential one but has no page to draw or edit yet.
+    #[error("section `{0}` has no sequential page")]
+    NoSequentialPage(u32),
+    /// The section already has a sequential page, so another cannot be added.
+    #[error("section `{0}` already has a sequential page")]
+    PageExists(u32),
+    /// No step of the section's page carries the requested number.
+    #[error("section {section} has no step {step}")]
+    UnknownStep {
+        /// Id of the section.
+        section: u32,
+        /// Number of the step.
+        step: u32,
+    },
+    /// No transition of the section's page carries the requested number.
+    #[error("section {section} has no transition {transition}")]
+    UnknownTransition {
+        /// Id of the section.
+        section: u32,
+        /// Number of the transition.
+        transition: u32,
+    },
+    /// Another step already uses this number.
+    #[error("step number `{0}` is already in use")]
+    DuplicateStep(u32),
+    /// Another transition already uses this number.
+    #[error("transition number `{0}` is already in use")]
+    DuplicateTransition(u32),
+    /// The cell already holds a step or a transition, so nothing can go there.
+    #[error("cell (x {x}, y {y}) of section {section} is already occupied")]
+    SfcCellOccupied {
+        /// Id of the section.
+        section: u32,
+        /// Column of the cell.
+        x: i32,
+        /// Row of the cell.
+        y: i32,
+    },
+    /// The condition text is not an expression the engine can evaluate.
+    #[error("`{text}` is not a condition: {message}")]
+    BadCondition {
+        /// The text the user typed.
+        text: String,
+        /// Why it does not parse.
+        message: String,
+    },
     /// There is no file to save to yet; an explicit path is required first.
     #[error("the project has no file path: save it with an explicit path first")]
     NoPath,
@@ -98,6 +144,55 @@ mod tests {
         assert_eq!(
             EditError::DuplicateSection(1).to_string(),
             "section id `1` is already in use"
+        );
+        assert_eq!(
+            EditError::NoSequentialPage(2).to_string(),
+            "section `2` has no sequential page"
+        );
+        assert_eq!(
+            EditError::PageExists(2).to_string(),
+            "section `2` already has a sequential page"
+        );
+        assert_eq!(
+            EditError::UnknownStep {
+                section: 2,
+                step: 7
+            }
+            .to_string(),
+            "section 2 has no step 7"
+        );
+        assert_eq!(
+            EditError::UnknownTransition {
+                section: 2,
+                transition: 7
+            }
+            .to_string(),
+            "section 2 has no transition 7"
+        );
+        assert_eq!(
+            EditError::DuplicateStep(3).to_string(),
+            "step number `3` is already in use"
+        );
+        assert_eq!(
+            EditError::DuplicateTransition(3).to_string(),
+            "transition number `3` is already in use"
+        );
+        assert_eq!(
+            EditError::SfcCellOccupied {
+                section: 1,
+                x: 2,
+                y: 3
+            }
+            .to_string(),
+            "cell (x 2, y 3) of section 1 is already occupied"
+        );
+        assert_eq!(
+            EditError::BadCondition {
+                text: "%?".to_owned(),
+                message: "unexpected character".to_owned(),
+            }
+            .to_string(),
+            "`%?` is not a condition: unexpected character"
         );
         assert!(EditError::NoPath.to_string().contains("no file path"));
     }

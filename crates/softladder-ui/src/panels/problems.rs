@@ -8,7 +8,7 @@
 //! report what was skipped rather than hide it.
 
 use egui::{Align, Layout, RichText, Sense, Stroke, Ui};
-use softladder_core::{Diagnostic, Project, Severity};
+use softladder_core::{Diagnostic, Project, SectionLanguage, Severity};
 
 use crate::app::{CentreTab, EditorApp};
 use crate::design::{
@@ -16,6 +16,93 @@ use crate::design::{
 };
 use crate::panels::icons::{self, Icon};
 use crate::queries;
+
+/// The sequential element an SFC diagnostic names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SfcElement {
+    /// A step, by number.
+    Step(u32),
+    /// A transition, by number.
+    Transition(u32),
+}
+
+/// Where an SFC diagnostic points: its section, its page and its element.
+///
+/// `lint` writes sequential diagnostics as `SFC section `X` page 3 transition 4:
+/// source step 9 does not exist`, and a `Diagnostic` carries only the section
+/// index, so the page and the element are read back out of the message — the
+/// same way [`cell_from_message`](crate::queries::cell_from_message) reads the
+/// cell a duplicate-cell diagnostic names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SfcTarget {
+    /// Index of the owning section in `Project::sections`.
+    pub section: usize,
+    /// Page the message names, when it names one.
+    pub page: Option<u32>,
+    /// Element the message names, when it names one.
+    pub element: Option<SfcElement>,
+}
+
+/// The first integer that follows `prefix` in `text`, and the text after it.
+///
+/// Returning the tail lets a caller look for a *second* marker without reading
+/// the same number twice: `page 3 transition 7: source step 9 does not exist`
+/// names the page first, then the transition, then a step.
+fn number_after<'a>(text: &'a str, prefix: &str) -> (Option<u32>, &'a str) {
+    let Some(rest) = text.split(prefix).nth(1) else {
+        return (None, text);
+    };
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    let number = digits.parse().ok();
+    (number, &rest[digits.len().min(rest.len())..])
+}
+
+/// The element marker that comes first after `text`, if any.
+///
+/// The first of `step N` / `transition N` is the subject of the message; a later
+/// one is something it talks about ("transition 7: source step 9 does not
+/// exist"), and the subject is what the user wants selected.
+fn element_marker(text: &str) -> Option<SfcElement> {
+    let step = text.find("step ");
+    let transition = text.find("transition ");
+    match (step, transition) {
+        (Some(step), Some(transition)) if step < transition => {
+            number_after(&text[step..], "step ").0.map(SfcElement::Step)
+        }
+        (Some(_), Some(transition)) => number_after(&text[transition..], "transition ")
+            .0
+            .map(SfcElement::Transition),
+        (Some(step), None) => number_after(&text[step..], "step ").0.map(SfcElement::Step),
+        (None, Some(transition)) => number_after(&text[transition..], "transition ")
+            .0
+            .map(SfcElement::Transition),
+        (None, None) => None,
+    }
+}
+
+/// Reads the page and the element out of an SFC diagnostic message.
+///
+/// Anything that does not announce itself as an `SFC section` diagnostic is not
+/// one, so a ladder message can never be mistaken for a chart location.
+pub fn sfc_target_of(diagnostic: &Diagnostic) -> Option<SfcTarget> {
+    if !diagnostic.message.starts_with("SFC section") {
+        return None;
+    }
+    let section = diagnostic.section?;
+    let (page, rest) = number_after(&diagnostic.message, "page ");
+    Some(SfcTarget {
+        section,
+        page,
+        element: element_marker(rest),
+    })
+}
+
+/// [`sfc_target_of`], but only for a diagnostic that points at an SFC section.
+pub fn sfc_target(project: &Project, diagnostic: &Diagnostic) -> Option<SfcTarget> {
+    let target = sfc_target_of(diagnostic)?;
+    let section = project.sections.get(target.section)?;
+    (section.language == SectionLanguage::Sfc).then_some(target)
+}
 
 /// One rendered row of the list.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +119,8 @@ pub struct ProblemRow {
     pub rung: Option<u32>,
     /// The cell the row points at, when the message names one.
     pub cell: Option<(u8, u8)>,
+    /// The sequential element the row points at, for an SFC diagnostic.
+    pub sfc: Option<SfcTarget>,
 }
 
 /// The marker drawn for a severity.
@@ -64,6 +153,18 @@ fn section_name(project: &Project, index: usize) -> String {
 
 /// Where a diagnostic points, as the operator reads it.
 pub fn location_of(project: &Project, diagnostic: &Diagnostic) -> String {
+    if let Some(target) = sfc_target(project, diagnostic) {
+        let mut parts = vec![section_name(project, target.section)];
+        if let Some(page) = target.page {
+            parts.push(format!("page {page}"));
+        }
+        match target.element {
+            Some(SfcElement::Step(number)) => parts.push(format!("step {number}")),
+            Some(SfcElement::Transition(number)) => parts.push(format!("transition {number}")),
+            None => {}
+        }
+        return parts.join(" · ");
+    }
     let Some(target) = queries::problem_target(project, diagnostic) else {
         return match diagnostic.section {
             Some(index) => section_name(project, index),
@@ -111,6 +212,7 @@ pub fn rows(project: &Project, diagnostics: &[Diagnostic]) -> Vec<ProblemRow> {
                 location: location_of(project, diagnostic),
                 rung: target.map(|target| target.rung),
                 cell: target.and_then(|target| target.cell),
+                sfc: sfc_target(project, diagnostic),
             }
         })
         .collect()
@@ -173,6 +275,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     }
 
     let mut go: Option<(u32, Option<(u8, u8)>)> = None;
+    let mut go_sfc: Option<SfcTarget> = None;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -215,29 +318,67 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                                             .size(TypeScale::CAPTION)
                                             .color(tokens.text_dim),
                                     )
-                                    .on_hover_text("Click to show the offending rung");
-                                if row.rung.is_some() {
+                                    .on_hover_text(if row.sfc.is_some() {
+                                        "Click to show the offending page of the chart"
+                                    } else {
+                                        "Click to show the offending rung"
+                                    });
+                                if row.rung.is_some() || row.sfc.is_some() {
                                     let (rect, _) = ui.allocate_exact_size(
                                         egui::vec2(12.0, 12.0),
                                         Sense::hover(),
                                     );
-                                    icons::draw(ui.painter(), rect, &tokens, Icon::Rung);
+                                    let icon = if row.sfc.is_some() {
+                                        Icon::Section
+                                    } else {
+                                        Icon::Rung
+                                    };
+                                    icons::draw(ui.painter(), rect, &tokens, icon);
                                 }
                                 location
                             })
                             .inner;
-                        if (response.clicked() || target.clicked()) && row.rung.is_some() {
-                            go = Some((row.rung.unwrap_or(0), row.cell));
+                        if response.clicked() || target.clicked() {
+                            if row.sfc.is_some() {
+                                go_sfc = row.sfc;
+                            } else if row.rung.is_some() {
+                                go = Some((row.rung.unwrap_or(0), row.cell));
+                            }
                         }
                         ui.end_row();
                     }
                 });
         });
 
+    if let Some(target) = go_sfc {
+        open_sequential(app, target);
+    }
     if let Some((rung, cell)) = go {
         app.centre_tab = CentreTab::Ladder;
         app.select(rung, cell);
     }
+}
+
+/// Opens the sequential document on the page and element a diagnostic names.
+///
+/// It is the same gesture as the ladder's: the centre switches to the program
+/// document, the owning section is selected and the offending step or transition
+/// is selected on its page.
+fn open_sequential(app: &mut EditorApp, target: SfcTarget) {
+    app.centre_tab = CentreTab::Ladder;
+    app.select_section(target.section);
+    let Some(page) = target.page else {
+        // `SL-W002`: the section has no page to open, so the document shows its
+        // "Add a page" state and the inspector offers the button.
+        crate::sfc::select(app, None);
+        app.note("this section has no page yet");
+        return;
+    };
+    let selection = target.element.map(|element| match element {
+        SfcElement::Step(number) => crate::sfc::Selection::Step(number),
+        SfcElement::Transition(number) => crate::sfc::Selection::Transition(number),
+    });
+    crate::sfc::focus(app, page, selection);
 }
 
 /// The severity cell: a mark and the word, so the list is readable in greyscale.
@@ -448,6 +589,181 @@ mod tests {
         }
         assert_eq!(severity_mark(Severity::Error), "⛔");
         assert_eq!(severity_mark(Severity::Warning), "⚠");
+    }
+
+    /// A project whose second section is a sequential chart.
+    fn sfc_project() -> Project {
+        use softladder_core::{SequentialPage, Step};
+        let mut project = project();
+        let mut page = SequentialPage::new(0, "sequence");
+        page.steps.push(Step {
+            number: 0,
+            is_initial: true,
+            x: 0,
+            y: 0,
+            page: 0,
+        });
+        let mut section = Section::new(2, "Sequence");
+        section.language = softladder_core::SectionLanguage::Sfc;
+        section.sequential_page = Some(page);
+        project.sections.push(section);
+        project
+    }
+
+    /// A diagnostic worded exactly like `lint_sequential` writes one.
+    fn sfc_diagnostic(message: &str) -> Diagnostic {
+        Diagnostic {
+            severity: Severity::Warning,
+            code: "SL-W011",
+            section: Some(2),
+            rung: None,
+            message: message.to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_sequential_diagnostic_carries_its_page_and_its_element() {
+        let step = sfc_diagnostic(
+            "SFC section `Sequence` page 0: step 4 is referenced by no transition and can never \
+             be activated",
+        );
+        assert_eq!(
+            sfc_target_of(&step),
+            Some(SfcTarget {
+                section: 2,
+                page: Some(0),
+                element: Some(SfcElement::Step(4)),
+            })
+        );
+        let transition = sfc_diagnostic(
+            "SFC section `Sequence` page 3 transition 7: no condition, so it fires whenever its \
+             source steps are active",
+        );
+        assert_eq!(
+            sfc_target_of(&transition),
+            Some(SfcTarget {
+                section: 2,
+                page: Some(3),
+                element: Some(SfcElement::Transition(7)),
+            })
+        );
+        let dangling = sfc_diagnostic(
+            "SFC section `Sequence` page 3 transition 7: source step 9 does not exist",
+        );
+        assert_eq!(
+            sfc_target_of(&dangling).and_then(|target| target.element),
+            Some(SfcElement::Transition(7)),
+            "the transition is the subject, not the step it names"
+        );
+        let wrong_page = sfc_diagnostic(
+            "SFC section `Sequence` page 2: step 5 records page 9 but is listed under page 2",
+        );
+        assert_eq!(
+            sfc_target_of(&wrong_page),
+            Some(SfcTarget {
+                section: 2,
+                page: Some(2),
+                element: Some(SfcElement::Step(5)),
+            }),
+            "the band the element is listed under is the one to open"
+        );
+        // The section-level warning has no page and no element.
+        let no_page = sfc_diagnostic("SFC section `Sequence` has no page");
+        assert_eq!(
+            sfc_target_of(&no_page),
+            Some(SfcTarget {
+                section: 2,
+                page: None,
+                element: None,
+            })
+        );
+        // A ladder message is never mistaken for a chart location.
+        assert_eq!(
+            sfc_target_of(&diagnostic(Some(0), Some(0), "two on one cell")),
+            None
+        );
+        assert_eq!(
+            sfc_target_of(&diagnostic(None, None, "whole project")),
+            None
+        );
+    }
+
+    #[test]
+    fn a_sequential_location_reads_as_a_page_and_an_element() {
+        let project = sfc_project();
+        let step = sfc_diagnostic("SFC section `Sequence` page 0: step 4 can never be activated");
+        assert_eq!(location_of(&project, &step), "Sequence · page 0 · step 4");
+        let transition = sfc_diagnostic("SFC section `Sequence` page 3 transition 7: no condition");
+        assert_eq!(
+            location_of(&project, &transition),
+            "Sequence · page 3 · transition 7"
+        );
+        let no_page = sfc_diagnostic("SFC section `Sequence` has no page");
+        assert_eq!(location_of(&project, &no_page), "Sequence");
+
+        let rows = rows(&project, &[step, transition, no_page]);
+        assert_eq!(rows[0].sfc.and_then(|target| target.page), Some(0));
+        assert_eq!(rows[0].rung, None, "an SFC row names no rung");
+        assert_eq!(
+            rows[1].sfc.and_then(|target| target.element),
+            Some(SfcElement::Transition(7))
+        );
+        assert_eq!(rows[2].sfc.and_then(|target| target.page), None);
+    }
+
+    #[test]
+    fn only_a_sequential_section_gets_a_sequential_target() {
+        let mut project = sfc_project();
+        let message = "SFC section `Sequence` page 0: step 4 can never be activated";
+        assert!(sfc_target(&project, &sfc_diagnostic(message)).is_some());
+        // The same message pointing at the ladder section resolves to nothing:
+        // the language decides, not the wording.
+        if let Some(section) = project.sections.get_mut(0) {
+            section.language = softladder_core::SectionLanguage::Ladder;
+        }
+        let mut wrong = sfc_diagnostic(message);
+        wrong.section = Some(0);
+        assert_eq!(sfc_target(&project, &wrong), None);
+        assert_eq!(
+            sfc_target(&project, &diagnostic(Some(9), None, message)),
+            None,
+            "a section the project does not have resolves to nothing"
+        );
+    }
+
+    #[test]
+    fn clicking_a_sequential_row_opens_its_page_and_selects_the_element() {
+        let mut app = EditorApp::new(sfc_project());
+        assert_eq!(app.selected_section, 0, "the ladder section starts open");
+        open_sequential(
+            &mut app,
+            SfcTarget {
+                section: 2,
+                page: Some(0),
+                element: Some(SfcElement::Transition(3)),
+            },
+        );
+        assert_eq!(app.centre_tab, CentreTab::Ladder);
+        assert_eq!(app.selected_section, 2);
+        assert_eq!(
+            crate::sfc::view().selection,
+            Some(crate::sfc::Selection::Transition(3))
+        );
+        assert_eq!(crate::sfc::view().page, Some(0));
+
+        // A section that has no page yet opens its "Add a page" state instead of
+        // a page that does not exist.
+        open_sequential(
+            &mut app,
+            SfcTarget {
+                section: 2,
+                page: None,
+                element: None,
+            },
+        );
+        assert_eq!(crate::sfc::view().selection, None);
+        assert!(app.status().contains("no page"));
+        crate::sfc::reset_view();
     }
 
     #[test]

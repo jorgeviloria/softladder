@@ -239,6 +239,13 @@ emphasised, and step times update in place. Diagnostics land in the Problems doc
 location (`page n · step m`), and clicking a row opens the SFC page and selects the element — the
 same gesture as the ladder, because it is the same panel.
 
+**As built — the one place the model forced a decision.** A transition is a junction when it has
+more than one source or more than one target, and that is what the double bar means. The *AND
+divergence* tool inserts a transition wired to the whole parallel group of the column above and
+below; the *OR divergence* tool wires the nearest step above and below, so a second OR branch placed
+the same way shares the source and the inspector labels the junction `OR`. A plain sequence
+transition gets no badge rather than a wrong one.
+
 **Not in the first cut:** macro steps, variable-based step numbers, action qualifiers as separate
 boxes, and printing an SFC page. They are recorded here so the first cut is judged against a list
 rather than against a memory.

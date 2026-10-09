@@ -125,6 +125,13 @@ const FIT_MIN_ZOOM: f32 = 0.8;
 
 /// Draws the ladder document and turns pointer input into editor calls.
 pub fn show(app: &mut EditorApp, ui: &mut Ui) {
+    // An SFC section is edited in a document of its own — same tab, other
+    // language — so the sequential editor draws it.
+    if crate::sfc::is_sfc(app.project(), app.selected_section) {
+        crate::sfc::show(app, ui);
+        return;
+    }
+
     let (response, painter) = ui.allocate_painter(ui.available_size(), Sense::click_and_drag());
     let panel = response.rect;
     let tokens = app.tokens;

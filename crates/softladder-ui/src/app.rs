@@ -520,7 +520,10 @@ impl EditorApp {
         for (key, modifiers) in events {
             if let Some(action) = crate::shortcuts::global_action(key, modifiers) {
                 self.handle(action);
-            } else if !typing {
+            } else if !typing && !crate::sfc::is_sfc(self.project(), self.selected_section) {
+                // The ladder's editing keys. An SFC section owns its own map
+                // (the sequential document applies it while it draws), so the two
+                // never act on the same key press.
                 if let Some(action) = crate::shortcuts::canvas_action(key, modifiers) {
                     self.handle(action);
                 }
