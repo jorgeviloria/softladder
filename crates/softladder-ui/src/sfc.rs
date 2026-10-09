@@ -686,7 +686,7 @@ fn read_bands(page: &SequentialPage, painter: &Painter, tokens: &Tokens) -> Vec<
             .map(|step| step.y)
             .chain(transitions.iter().map(|transition| transition.y))
             .max()
-            .map_or(MIN_ROWS - 1, |row| row))
+            .unwrap_or(MIN_ROWS - 1))
         .saturating_add(1)
         .clamp(MIN_ROWS, MAX_ROWS);
         let cols = (steps
@@ -694,7 +694,7 @@ fn read_bands(page: &SequentialPage, painter: &Painter, tokens: &Tokens) -> Vec<
             .map(|step| step.x)
             .chain(transitions.iter().map(|transition| transition.x))
             .max()
-            .map_or(MIN_COLS - 1, |col| col))
+            .unwrap_or(MIN_COLS - 1))
         .saturating_add(1)
         .clamp(MIN_COLS, MAX_COLS);
         let height = header_height(!comment.trim().is_empty(), comment_lines)
@@ -3313,7 +3313,7 @@ mod tests {
             .map(|step| step.y)
             .chain(page.transitions.iter().map(|t| t.y))
             .max()
-            .map_or(MIN_ROWS - 1, |row| row)
+            .unwrap_or(MIN_ROWS - 1)
             .saturating_add(1)
             .clamp(MIN_ROWS, MAX_ROWS);
         Band {
