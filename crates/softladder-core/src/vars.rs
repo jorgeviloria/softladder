@@ -31,8 +31,6 @@ use serde::{Deserialize, Serialize};
 pub const SHIFT_CARRY_BIT: u32 = 8;
 
 /// Storage class of a SoftLadder variable.
-///
-/// Kinds of variable the engine can address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum VarKind {
     /// Internal bit memory (`%M`). ClassicLadder alias: `%B`.

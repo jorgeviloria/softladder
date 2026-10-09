@@ -884,8 +884,21 @@ pub fn eval(expr: &Expr, source: &dyn VarSource) -> Result<Value, EvalError> {
 /// its carry in [`EvalEffects::shift_carry`] for the caller to write to `%S8`.
 pub fn eval_with(expr: &Expr, source: &dyn VarSource) -> Result<(Value, EvalEffects), EvalError> {
     let mut effects = EvalEffects::default();
-    let value = eval_at(expr, source, 0, &mut effects)?;
+    let value = eval_into(expr, source, &mut effects)?;
     Ok((value, effects))
+}
+
+/// Evaluates `expr`, recording effects into `effects` as they happen.
+///
+/// Unlike [`eval_with`], the effects survive an error: a shift that ran before a
+/// later failure has already "written `%S8`" in the reference, so the caller can
+/// still publish it.
+pub fn eval_into(
+    expr: &Expr,
+    source: &dyn VarSource,
+    effects: &mut EvalEffects,
+) -> Result<Value, EvalError> {
+    eval_at(expr, source, 0, effects)
 }
 
 fn eval_at(
@@ -1235,20 +1248,24 @@ mod tests {
         assert_eq!(evaluate("MAX(SHL(1, 2), 3)", &vars), Ok(Value::Word(4)));
         assert_eq!(evaluate("SHL(%MW0, 1)", &vars), Ok(Value::Word(12)));
     }
+
+    /// The carry `source` reports when evaluated against `vars`.
+    fn carry_of(source: &str, vars: &TestVars) -> Option<bool> {
+        let expr: Expr = source.parse().expect("an expression parses");
+        let (_, effects) = expr.eval_with(vars).expect("it evaluates");
+        effects.shift_carry
+    }
+
     /// ClassicLadder reads the operand's most significant bit for a left shift or
     /// rotate, whatever the amount, and writes it to `%S8`.
     #[test]
     fn a_left_shift_or_rotate_reports_the_sign_bit() {
         let vars = TestVars::new(&[("%MW0", Value::Word(-32768)), ("%MW1", Value::Word(1))]);
         for source in ["SHL(%MW0,1)", "ROL(%MW0,7)"] {
-            let expr: Expr = source.parse().expect("an expression parses");
-            let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
-            assert_eq!(effects.shift_carry, Some(true), "{source}");
+            assert_eq!(carry_of(source, &vars), Some(true), "{source}");
         }
         for source in ["SHL(%MW1,1)", "ROL(%MW1,3)"] {
-            let expr: Expr = source.parse().expect("an expression parses");
-            let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
-            assert_eq!(effects.shift_carry, Some(false), "{source}");
+            assert_eq!(carry_of(source, &vars), Some(false), "{source}");
         }
     }
 
@@ -1257,14 +1274,10 @@ mod tests {
     fn a_right_shift_or_rotate_reports_the_low_bit() {
         let vars = TestVars::new(&[("%MW0", Value::Word(1)), ("%MW1", Value::Word(2))]);
         for source in ["SHR(%MW0,1)", "ROR(%MW0,9)"] {
-            let expr: Expr = source.parse().expect("an expression parses");
-            let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
-            assert_eq!(effects.shift_carry, Some(true), "{source}");
+            assert_eq!(carry_of(source, &vars), Some(true), "{source}");
         }
         for source in ["SHR(%MW1,1)", "ROR(%MW1,1)"] {
-            let expr: Expr = source.parse().expect("an expression parses");
-            let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
-            assert_eq!(effects.shift_carry, Some(false), "{source}");
+            assert_eq!(carry_of(source, &vars), Some(false), "{source}");
         }
     }
 
@@ -1274,26 +1287,29 @@ mod tests {
         // right shift reports false), so the carry must be the *last* one that
         // ran: the reference writes `%S8` as each operation executes.
         let vars = TestVars::new(&[("%MW0", Value::Word(-32768)), ("%MW1", Value::Word(2))]);
-        let expr: Expr = "SHL(%MW0,1) + SHR(%MW1,1)"
-            .parse()
-            .expect("an expression parses");
-        let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
-        assert_eq!(effects.shift_carry, Some(false));
-
-        let expr: Expr = "SHR(%MW1,1) + SHL(%MW0,1)"
-            .parse()
-            .expect("an expression parses");
-        let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
-        assert_eq!(effects.shift_carry, Some(true));
+        assert_eq!(carry_of("SHL(%MW0,1) + SHR(%MW1,1)", &vars), Some(false));
+        assert_eq!(carry_of("SHR(%MW1,1) + SHL(%MW0,1)", &vars), Some(true));
     }
 
     #[test]
     fn an_expression_without_a_shift_reports_nothing() {
         let vars = TestVars::new(&[("%MW0", Value::Word(4))]);
-        let expr: Expr = "(%MW0 + 1) * 2".parse().expect("an expression parses");
-        let (_, effects) = expr.eval_with(&vars).expect("it evaluates");
-        assert_eq!(effects.shift_carry, None, "nothing to publish");
+        assert_eq!(
+            carry_of("(%MW0 + 1) * 2", &vars),
+            None,
+            "nothing to publish"
+        );
         // And the pure entry point still returns only the value.
+        let expr: Expr = "(%MW0 + 1) * 2".parse().expect("an expression parses");
         assert_eq!(expr.eval(&vars), Ok(Value::Word(10)));
+    }
+
+    #[test]
+    fn the_carry_survives_a_later_error() {
+        let vars = TestVars::new(&[("%MW0", Value::Word(-32768))]);
+        let expr: Expr = "SHL(%MW0,1) + 1 / 0".parse().expect("an expression parses");
+        let mut effects = EvalEffects::default();
+        assert!(eval_into(&expr, &vars, &mut effects).is_err());
+        assert_eq!(effects.shift_carry, Some(true));
     }
 }

@@ -297,7 +297,6 @@ scan_once(now_ms):
 A scan is *deterministic*: it depends only on the project, the variable state and `now_ms`. Nothing
 reads the clock, the filesystem or the network.
 
-
 ### The shift and rotate carry
 
 `SHL`, `SHR`, `ROL` and `ROR` are the one impure thing in an expression, and the impurity is not

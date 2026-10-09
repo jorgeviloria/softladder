@@ -43,13 +43,13 @@ use std::collections::{BTreeMap, HashMap, VecDeque};
 use serde::{Deserialize, Serialize};
 
 use crate::diag::{Diagnostic, Severity};
-use crate::expr::{eval_with, parse, Expr, Value, VarSource};
+use crate::expr::{eval_into, parse, EvalEffects, EvalError, Expr, Value, VarSource};
 use crate::model::{
     CounterKind, ElementKind, PlacedElement, Project, RegisterMode, Rung, Section, SectionLanguage,
     TimerMode, WireMode,
 };
 use crate::sfc::{SequentialPage, Transition};
-use crate::vars::{Accessor, VarKind, VarRef};
+use crate::vars::{Accessor, VarKind, VarRef, SHIFT_CARRY_BIT};
 
 /// Default number of internal bit memories (`%M`).
 pub const DEFAULT_MEM_BITS: usize = 500;
@@ -2047,28 +2047,34 @@ impl Machine<'_> {
         }
     }
 
+    /// Parses and evaluates `text`, publishing the carry of any shift or rotate it
+    /// ran to `%S8` as the reference does.
+    ///
+    /// The carry is published even when the evaluation fails afterwards, because
+    /// the reference writes the bit as each shift executes. `publish` is false for
+    /// a block whose rung is dead: it is still evaluated, but must not touch the
+    /// bit. A scan that runs no shift never touches it either, so a project that
+    /// sets it by hand — or that reads it after a shift in an earlier rung of the
+    /// same scan — sees what the reference would.
+    fn eval_text(&mut self, text: &str, publish: bool) -> Result<Value, EvalError> {
+        let expr = parse(text)?;
+        let mut effects = EvalEffects::default();
+        let result = eval_into(&expr, self.store, &mut effects);
+        if let (true, Some(carry)) = (publish, effects.shift_carry) {
+            let var = VarRef::new(VarKind::System, SHIFT_CARRY_BIT);
+            if let Err(error) = self.store.set(&var, Value::Bit(carry)) {
+                self.error("SL-E003", format!("cannot write `{var}`: {error}"));
+            }
+        }
+        result
+    }
+
     /// Reads the preset of a block in time-base units.
     ///
     /// A literal parameter is a duration in milliseconds, so `300` on a timer
     /// with the default 100 ms base is three units. A parameter that names a
     /// variable is read through the store and is used as it stands, which lets a
     /// project hold presets in whatever unit it prefers.
-    /// Publishes the carry a shift or rotate left behind in the expression it ran
-    /// in, as the reference does: the bit goes to `%S8`.
-    ///
-    /// A scan that runs no shift never touches the bit, so a project that sets it
-    /// by hand — or that reads it after a shift in an earlier rung of the same
-    /// scan — sees what the reference would.
-    fn write_shift_carry(&mut self, effects: crate::expr::EvalEffects) {
-        let Some(carry) = effects.shift_carry else {
-            return;
-        };
-        let var = VarRef::new(VarKind::System, crate::vars::SHIFT_CARRY_BIT);
-        if let Err(error) = self.store.set(&var, Value::Bit(carry)) {
-            self.error("SL-E003", format!("cannot write `{var}`: {error}"));
-        }
-    }
-
     fn block_preset_units(&mut self, element: &PlacedElement, base: TimeBase) -> u64 {
         let Some(parameter) = element.params.first().map(|text| text.trim().to_owned()) else {
             return 0;
@@ -2343,11 +2349,8 @@ impl Machine<'_> {
                 return false;
             }
         };
-        match parse(&expression).and_then(|expr| eval_with(&expr, self.store)) {
-            Ok((value, effects)) => {
-                self.write_shift_carry(effects);
-                value.as_bool() && input
-            }
+        match self.eval_text(&expression, input) {
+            Ok(value) => value.as_bool() && input,
             Err(error) => {
                 self.error(
                     "SL-E002",
@@ -2394,11 +2397,8 @@ impl Machine<'_> {
                 return;
             }
         };
-        let value = match parse(expression).and_then(|expr| eval_with(&expr, self.store)) {
-            Ok((value, effects)) => {
-                self.write_shift_carry(effects);
-                value
-            }
+        let value = match self.eval_text(expression, true) {
+            Ok(value) => value,
             Err(error) => {
                 self.error(
                     "SL-E002",

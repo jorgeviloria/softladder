@@ -1,11 +1,12 @@
 //! `WordsShiftsLeftRightExample.clprj` is ClassicLadder's demonstration of
 //! `SHL`, `SHR`, `ROL` and `ROR` — its `PARAM_COMMENT` calls it "the new system
 //! bit S8 associated" with them — so it is the natural corpus test for the carry
-//! that closes divergence 2 of `testdata/known-divergences.md`.
+//! that closes the shift-carry entry of `testdata/known-divergences.md`.
 //!
 //! **What this asserts, and what it does not.** The file imports cleanly and
-//! scans without a panic or an Error; the carry itself is asserted precisely in
-//! `softladder-core` (per function, last-operation-wins, a rung reading `%S8` in
+//! scans without a panic or an Error. It deliberately does *not* assert `%S8`: the
+//! bit starts clear, so such an assertion would pass even if no shift ran. The carry is
+//! asserted precisely in `softladder-core` (per function, last-operation-wins, a rung reading `%S8` in
 //! the same scan). What it does *not* assert is the example's word results,
 //! because its two rungs do not become live through our import: with every
 //! `%I1`…`%I9` contact closed the coils on the same rows still read false, so its
@@ -29,14 +30,8 @@ fn shift_example() -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
-/// Reads a variable, or `None` when the store has no such slot.
-fn get(engine: &ScanEngine, text: &str) -> Option<Value> {
-    let var: VarRef = text.parse().expect("the variable parses");
-    engine.store().get(&var)
-}
-
 #[test]
-fn the_reference_shift_example_runs_and_publishes_the_carry() {
+fn the_reference_shift_example_imports_and_scans_clean() {
     let Some(path) = shift_example() else {
         println!("note: skipping, the corpus is absent");
         return;
@@ -65,8 +60,4 @@ fn the_reference_shift_example_runs_and_publishes_the_carry() {
             scan.diagnostics
         );
     }
-
-    // The carry is published: after the shifts of the last scan it is clear. (The
-    // `true` direction is asserted per function in `softladder-core`.)
-    assert_eq!(get(&engine, "%S8"), Some(Value::Bit(false)));
 }
