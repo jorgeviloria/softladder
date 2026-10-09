@@ -24,10 +24,11 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use eframe::egui;
 use softladder_core::Project;
+use softladder_edit::Editor;
 use softladder_project::native;
 
 pub mod app;
@@ -50,6 +51,18 @@ pub use watch::{ValueFormat, WatchRow};
 /// Project opened at start-up, relative to the current working directory.
 pub const STARTUP_PROJECT: &str = "examples/traffic_light.slprj";
 
+/// The project named on the command line, if there is one.
+pub fn project_from_arguments() -> Option<PathBuf> {
+    let mut arguments = std::env::args_os().skip(1);
+    let first = arguments.next()?;
+    // Ignore a lone flag such as `--help`: only a path is meaningful here.
+    let path = PathBuf::from(first);
+    if path.to_string_lossy().starts_with('-') {
+        return None;
+    }
+    Some(path)
+}
+
 /// Loads the start-up project, falling back to an empty project.
 pub fn load_startup_project() -> Project {
     native::load(Path::new(STARTUP_PROJECT)).unwrap_or_default()
@@ -64,6 +77,30 @@ impl SoftLadderApp {
     /// Creates the editor and loads [`STARTUP_PROJECT`] when it exists.
     pub fn new(_context: &eframe::CreationContext<'_>) -> Self {
         Self::with_project(load_startup_project())
+    }
+
+    /// Creates the editor around the project named on the command line.
+    ///
+    /// A project passed as an argument is what every industrial tool accepts, and
+    /// it is also how the editor opens a file when it is launched from a
+    /// directory that has no `examples/` next to it. A path that cannot be read
+    /// falls back to the start-up project and says so in the status bar.
+    pub fn open(_context: &eframe::CreationContext<'_>, path: Option<PathBuf>) -> Self {
+        let Some(path) = path else {
+            return Self::with_project(load_startup_project());
+        };
+        match Editor::open(&path) {
+            Ok(editor) => {
+                let mut app = EditorApp::with_editor(editor);
+                app.note(&format!("opened {}", path.display()));
+                Self { app }
+            }
+            Err(error) => {
+                let mut app = EditorApp::new(load_startup_project());
+                app.note(&format!("cannot open {}: {error}", path.display()));
+                Self { app }
+            }
+        }
     }
 
     /// Creates the editor around an explicit project.

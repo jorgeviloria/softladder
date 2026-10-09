@@ -1,5 +1,9 @@
 //! SoftLadder editor binary: opens the `eframe` window running
 //! [`softladder_ui::SoftLadderApp`].
+//!
+//! `softladder-editor [project.slprj | project.clprj]` opens that project;
+//! without an argument it loads `examples/traffic_light.slprj` when it is next to
+//! the working directory.
 
 #![forbid(unsafe_code)]
 
@@ -13,5 +17,10 @@ fn main() -> eframe::Result<()> {
         .with_min_inner_size([800.0, 500.0])
         .with_title("SoftLadder");
     let options = eframe::NativeOptions { viewport, ..Default::default() };
-    eframe::run_native("SoftLadder", options, Box::new(|cc| Ok(Box::new(SoftLadderApp::new(cc)))))
+    let project = softladder_ui::project_from_arguments();
+    eframe::run_native(
+        "SoftLadder",
+        options,
+        Box::new(move |cc| Ok(Box::new(SoftLadderApp::open(cc, project)))),
+    )
 }

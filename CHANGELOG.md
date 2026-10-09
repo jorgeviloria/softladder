@@ -38,6 +38,10 @@ Expert); `docs/UX.md` is the spec and records what is deliberately not copied.
   display server. Dev-only: nothing is added to the shipped binary.
 - `EditorApp::{set_variable, variable}` so scripts and the harness can set bench
   inputs without a mouse.
+- The editor binary takes a project path (`softladder-editor line.slprj`), the
+  way every industrial tool does, and says in the status bar when a path cannot
+  be opened. Without an argument it still loads `examples/traffic_light.slprj`
+  relative to the working directory.
 
 ### Changed
 
