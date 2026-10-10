@@ -487,6 +487,30 @@ fn tab_bar(app: &mut EditorApp, ui: &mut Ui) {
             if response.clicked() {
                 app.centre_tab = tab;
             }
+            if tab == CentreTab::Watch {
+                if let Some(drag) =
+                    response.dnd_release_payload::<crate::panels::watch::WatchDrag>()
+                {
+                    let var = drag.var.clone();
+                    if crate::panels::watch::push_row(&mut app.watch, var.clone()) {
+                        app.note(&format!("watching {var}"));
+                    } else {
+                        app.note(&format!("{var} is already in the watch table"));
+                    }
+                    app.centre_tab = CentreTab::Watch;
+                }
+                if response
+                    .dnd_hover_payload::<crate::panels::watch::WatchDrag>()
+                    .is_some()
+                {
+                    ui.painter().rect_stroke(
+                        response.rect.expand(2.0),
+                        egui::CornerRadius::same(2),
+                        egui::Stroke::new(1.0_f32, tokens.accent),
+                        egui::StrokeKind::Inside,
+                    );
+                }
+            }
             if active {
                 // A 2 px accent underline, as TIA and Studio 5000 draw the open tab.
                 let rect = response.rect;

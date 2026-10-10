@@ -124,8 +124,15 @@ pub struct TreeRow {
     pub comment: String,
     /// A count shown at the right of the row.
     pub count: Option<usize>,
-    /// A count of diagnostics shown at the right in the error colour.
+    /// Error diagnostics that point at this row.
     pub errors: Option<usize>,
+    /// Warning diagnostics that point at this row.
+    pub warnings: Option<usize>,
+    /// The full secondary text, before [`truncate`] shortens `comment`.
+    ///
+    /// The row draws the short line; the tooltip draws this one, so a narrow
+    /// tree never hides a rung comment.
+    pub detail: String,
     /// Whether the row can be folded.
     pub expandable: bool,
     /// Whether the row's children are currently hidden.
@@ -212,6 +219,8 @@ pub fn tree(
         comment: String::new(),
         count: None,
         errors: None,
+        warnings: None,
+        detail: String::new(),
         expandable: true,
         collapsed: root_collapsed,
     }];
@@ -232,6 +241,8 @@ pub fn tree(
         comment: String::new(),
         count: Some(project.sections.len()),
         errors: None,
+        warnings: None,
+        detail: "Sections of the program".to_owned(),
         expandable: true,
         collapsed: program_collapsed,
     });
@@ -250,10 +261,13 @@ pub fn tree(
                 continue;
             }
             let rungs = queries::section_rungs(project, index);
-            let errors: usize = rungs
-                .iter()
-                .map(|rung| queries::rung_problem_count(project, problems, *rung))
-                .sum();
+            let mut errors = 0;
+            let mut warnings = 0;
+            for rung in &rungs {
+                let (rung_errors, rung_warnings) = rung_tally(project, problems, *rung);
+                errors += rung_errors;
+                warnings += rung_warnings;
+            }
             let collapsed = collapsed_probe(Node::Section, index);
             rows.push(TreeRow {
                 node: Node::Section,
@@ -266,7 +280,9 @@ pub fn tree(
                 text: section.name.clone(),
                 comment: language_label(section.language).to_owned(),
                 count: Some(rungs.len()),
-                errors: (errors > 0).then_some(errors),
+                errors: some_count(errors),
+                warnings: some_count(warnings),
+                detail: "Ladder section".to_owned(),
                 expandable: true,
                 collapsed,
             });
@@ -278,7 +294,7 @@ pub fn tree(
                     .rung(*rung)
                     .map(|rung| (rung.label.clone(), rung.comment.clone()))
                     .unwrap_or_default();
-                let rung_errors = queries::rung_problem_count(project, problems, *rung);
+                let (rung_errors, rung_warnings) = rung_tally(project, problems, *rung);
                 rows.push(TreeRow {
                     node: Node::Rung,
                     section: Some(index),
@@ -290,7 +306,9 @@ pub fn tree(
                     text: rung_title(position, &label),
                     comment: truncate(&comment, 40),
                     count: None,
-                    errors: (rung_errors > 0).then_some(rung_errors),
+                    errors: some_count(rung_errors),
+                    warnings: some_count(rung_warnings),
+                    detail: comment.trim().to_owned(),
                     expandable: false,
                     collapsed: false,
                 });
@@ -303,29 +321,75 @@ pub fn tree(
         "PLC tags",
         project.symbols.len(),
         None,
+        None,
+        "Names for the program's addresses",
     ));
     rows.push(document_row(
         Node::Bench,
         "Simulation bench",
         project.simulation.len(),
         None,
+        None,
+        "Operator controls wired to the program",
     ));
-    rows.push(document_row(Node::Watch, "Watch & force", 0, None));
+    rows.push(document_row(
+        Node::Watch,
+        "Watch & force",
+        0,
+        None,
+        None,
+        "Live values. Drag a tag or a ladder element here.",
+    ));
     let errors = problems
         .iter()
         .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        .count();
+    let warnings = problems
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Warning)
         .count();
     rows.push(document_row(
         Node::Problems,
         "Problems",
         problems.len(),
-        (errors > 0).then_some(errors),
+        some_count(errors),
+        some_count(warnings),
+        "Errors and warnings in the program",
     ));
     rows
 }
 
+/// `None` when there is nothing to badge, so a clean row stays clean.
+fn some_count(count: usize) -> Option<usize> {
+    (count > 0).then_some(count)
+}
+
+/// Errors and warnings that point at one ladder rung.
+fn rung_tally(project: &Project, problems: &[Diagnostic], rung: u32) -> (usize, usize) {
+    let mut errors = 0;
+    let mut warnings = 0;
+    for diagnostic in problems {
+        if queries::problem_target(project, diagnostic).map(|target| target.rung) != Some(rung) {
+            continue;
+        }
+        match diagnostic.severity {
+            Severity::Error => errors += 1,
+            Severity::Warning => warnings += 1,
+            Severity::Info => {}
+        }
+    }
+    (errors, warnings)
+}
+
 /// A document row of the tree.
-fn document_row(node: Node, text: &str, count: usize, errors: Option<usize>) -> TreeRow {
+fn document_row(
+    node: Node,
+    text: &str,
+    count: usize,
+    errors: Option<usize>,
+    warnings: Option<usize>,
+    detail: &str,
+) -> TreeRow {
     TreeRow {
         node,
         section: None,
@@ -338,6 +402,8 @@ fn document_row(node: Node, text: &str, count: usize, errors: Option<usize>) -> 
         comment: String::new(),
         count: Some(count),
         errors,
+        warnings,
+        detail: detail.to_owned(),
         expandable: false,
         collapsed: false,
     }
@@ -370,6 +436,8 @@ fn sequential_rows(
             comment: language_label(section.language).to_owned(),
             count: Some(0),
             errors: None,
+            warnings: None,
+            detail: "Sequential function chart".to_owned(),
             expandable: true,
             collapsed: collapsed_probe(Node::Section, index),
         });
@@ -378,7 +446,7 @@ fn sequential_rows(
 
     let numbers = page_numbers(page);
     let collapsed = collapsed_probe(Node::Section, index);
-    let errors = sequential_errors(problems, index, None, None);
+    let (errors, warnings) = sequential_tally(problems, index, None, None);
     rows.push(TreeRow {
         node: Node::Section,
         section: Some(index),
@@ -390,7 +458,9 @@ fn sequential_rows(
         text: section.name.clone(),
         comment: language_label(section.language).to_owned(),
         count: Some(numbers.len()),
-        errors: (errors > 0).then_some(errors),
+        errors: some_count(errors),
+        warnings: some_count(warnings),
+        detail: "Sequential function chart".to_owned(),
         expandable: true,
         collapsed,
     });
@@ -411,7 +481,7 @@ fn sequential_rows(
             .collect();
         let page_collapsed = collapsed_probe(Node::Page, page_key(index, number));
         let count = steps.len() + transitions.len();
-        let page_errors = sequential_errors(problems, index, Some(number), None);
+        let (page_errors, page_warnings) = sequential_tally(problems, index, Some(number), None);
         let comment = if number == page.number {
             page.comment.clone()
         } else {
@@ -428,7 +498,9 @@ fn sequential_rows(
             text: format!("Page {number}"),
             comment: truncate(&comment, 20),
             count: Some(count),
-            errors: (page_errors > 0).then_some(page_errors),
+            errors: some_count(page_errors),
+            warnings: some_count(page_warnings),
+            detail: comment.trim().to_owned(),
             expandable: true,
             collapsed: page_collapsed,
         });
@@ -436,12 +508,13 @@ fn sequential_rows(
             continue;
         }
         for step in steps {
-            let errors = sequential_errors(
+            let (errors, warnings) = sequential_tally(
                 problems,
                 index,
                 Some(number),
                 Some(SfcElement::Step(step.number)),
             );
+            let position = format!("x {} · y {}", step.x, step.y);
             rows.push(TreeRow {
                 node: Node::Step,
                 section: Some(index),
@@ -455,15 +528,17 @@ fn sequential_rows(
                 } else {
                     format!("{} step", step.number)
                 },
-                comment: format!("x {} · y {}", step.x, step.y),
+                comment: position.clone(),
                 count: None,
-                errors: (errors > 0).then_some(errors),
+                errors: some_count(errors),
+                warnings: some_count(warnings),
+                detail: position,
                 expandable: false,
                 collapsed: false,
             });
         }
         for transition in transitions {
-            let errors = sequential_errors(
+            let (errors, warnings) = sequential_tally(
                 problems,
                 index,
                 Some(number),
@@ -485,7 +560,9 @@ fn sequential_rows(
                 text: format!("T{}", transition.number),
                 comment: truncate(&condition, 40),
                 count: None,
-                errors: (errors > 0).then_some(errors),
+                errors: some_count(errors),
+                warnings: some_count(warnings),
+                detail: condition,
                 expandable: false,
                 collapsed: false,
             });
@@ -511,34 +588,81 @@ fn page_numbers(page: &softladder_core::SequentialPage) -> Vec<u32> {
     numbers
 }
 
-/// The diagnostics that point at a sequential row.
+/// Errors and warnings that point at a sequential row.
 ///
 /// A page is counted when the diagnostic names it, and an element when it names
-/// that element; a section with no page collects its own diagnostics.
-fn sequential_errors(
+/// that element; a section collects every diagnostic of its chart. Notes are
+/// omitted: a badge is for something the operator has to act on.
+fn sequential_tally(
     problems: &[Diagnostic],
     section: usize,
     page: Option<u32>,
     element: Option<SfcElement>,
-) -> usize {
-    problems
-        .iter()
-        .filter(|diagnostic| {
-            if diagnostic.section != Some(section) {
-                return false;
+) -> (usize, usize) {
+    let mut errors = 0;
+    let mut warnings = 0;
+    for diagnostic in problems {
+        if diagnostic.section != Some(section) {
+            continue;
+        }
+        let Some(target) = problems::sfc_target_of(diagnostic) else {
+            continue;
+        };
+        let hits = match (page, element) {
+            (Some(page), Some(element)) => {
+                target.page == Some(page) && target.element == Some(element)
             }
-            let Some(target) = problems::sfc_target_of(diagnostic) else {
-                return false;
-            };
-            match (page, element) {
-                (Some(page), Some(element)) => {
-                    target.page == Some(page) && target.element == Some(element)
-                }
-                (Some(page), None) => target.page == Some(page),
-                _ => true,
-            }
-        })
-        .count()
+            (Some(page), None) => target.page == Some(page),
+            _ => true,
+        };
+        if !hits {
+            continue;
+        }
+        match diagnostic.severity {
+            Severity::Error => errors += 1,
+            Severity::Warning => warnings += 1,
+            Severity::Info => {}
+        }
+    }
+    (errors, warnings)
+}
+
+/// The sentence under a row's name: what the trailing number counts.
+fn count_sentence(row: &TreeRow, count: usize) -> String {
+    let noun = match row.node {
+        Node::Program => "section",
+        Node::Section if row.comment == "SFC" => "page",
+        Node::Section => "network",
+        Node::Page => "element",
+        Node::Tags => "tag",
+        Node::Bench => "widget",
+        Node::Watch => "row",
+        Node::Problems => "item",
+        _ => "item",
+    };
+    let plural = if count == 1 { "" } else { "s" };
+    format!("{count} {noun}{plural}")
+}
+
+/// The tooltip of a row: the full name, the uncut comment, and what the badges mean.
+pub fn row_tip(row: &TreeRow, count: Option<usize>) -> String {
+    let mut lines = vec![row.text.clone()];
+    let detail = row.detail.trim();
+    if !detail.is_empty() && detail != row.text.trim() {
+        lines.push(detail.to_owned());
+    }
+    if let Some(count) = count {
+        lines.push(count_sentence(row, count));
+    }
+    if let Some(errors) = row.errors {
+        let plural = if errors == 1 { "" } else { "s" };
+        lines.push(format!("{errors} error{plural}"));
+    }
+    if let Some(warnings) = row.warnings {
+        let plural = if warnings == 1 { "" } else { "s" };
+        lines.push(format!("{warnings} warning{plural}"));
+    }
+    lines.join("\n")
 }
 
 /// Draws the project tree and the inline editors it opens.
@@ -611,6 +735,8 @@ struct TreeRequest {
     select_sequential: Option<(usize, u32, Option<crate::sfc::Selection>)>,
     centre: Option<CentreTab>,
     menu: Option<MenuChoice>,
+    /// A variable dropped on the Watch row.
+    dropped: Option<VarRef>,
 }
 
 /// What a row's context menu asked for.
@@ -680,6 +806,14 @@ impl TreeRequest {
         if let Some(tab) = self.centre {
             app.centre_tab = tab;
         }
+        if let Some(var) = self.dropped {
+            app.centre_tab = CentreTab::Watch;
+            if crate::panels::watch::push_row(&mut app.watch, var.clone()) {
+                app.note(&format!("watching {var}"));
+            } else {
+                app.note(&format!("{var} is already in the watch table"));
+            }
+        }
     }
 }
 
@@ -699,6 +833,24 @@ fn draw_row(
     let indent = SPACE_2 + row.depth as f32 * SPACE_2;
     let full = ui.available_width();
     let (rect, response) = ui.allocate_exact_size(egui::vec2(full, height), Sense::click());
+
+    response.clone().on_hover_text(row_tip(row, count));
+    if row.node == Node::Watch {
+        if let Some(drag) = response.dnd_release_payload::<crate::panels::watch::WatchDrag>() {
+            request.dropped = Some(drag.var.clone());
+        }
+        if response
+            .dnd_hover_payload::<crate::panels::watch::WatchDrag>()
+            .is_some()
+        {
+            ui.painter().rect_stroke(
+                rect,
+                egui::CornerRadius::same(2),
+                egui::Stroke::new(1.0_f32, tokens.accent),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
 
     if selected {
         ui.painter()
@@ -906,22 +1058,18 @@ fn row_icon(ui: &mut Ui, tokens: &Tokens, icon: Icon) {
     icons::draw(ui.painter(), rect, tokens, icon);
 }
 
-/// The problem marker and the count at the right of a row.
+/// The diagnostic badges and the count at the right of a row.
+///
+/// An error and a warning are different badges. The plain number is what the
+/// row contains (networks, tags, widgets); [`row_tip`] says so, because the
+/// tree is too narrow for the word.
 fn row_trailing(ui: &mut Ui, tokens: &Tokens, row: &TreeRow, count: Option<usize>) {
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+        if let Some(warnings) = row.warnings {
+            trailing_badge(ui, tokens, Icon::Warning, tokens.warning, warnings);
+        }
         if let Some(errors) = row.errors {
-            let text = if errors == 1 {
-                "1 problem".to_owned()
-            } else {
-                format!("{errors} problems")
-            };
-            ui.label(
-                RichText::new(text)
-                    .size(TypeScale::CAPTION)
-                    .color(tokens.error),
-            );
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), Sense::hover());
-            icons::draw(ui.painter(), rect, tokens, Icon::Error);
+            trailing_badge(ui, tokens, Icon::Error, tokens.error, errors);
         }
         if let Some(count) = count {
             ui.label(
@@ -931,6 +1079,18 @@ fn row_trailing(ui: &mut Ui, tokens: &Tokens, row: &TreeRow, count: Option<usize
             );
         }
     });
+}
+
+/// A 12 pt severity icon and its count.
+fn trailing_badge(ui: &mut Ui, tokens: &Tokens, icon: Icon, colour: egui::Color32, count: usize) {
+    ui.label(
+        RichText::new(count.to_string())
+            .size(TypeScale::CAPTION)
+            .color(colour)
+            .strong(),
+    );
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), Sense::hover());
+    icons::draw(ui.painter(), rect, tokens, icon);
 }
 
 /// A fold chevron; returns `true` when it was clicked.
@@ -1232,6 +1392,24 @@ mod tests {
         assert_eq!(rows[3].errors, Some(1));
         assert_eq!(rows[2].errors, Some(1));
         assert_eq!(rows[4].errors, None);
+        assert_eq!(rows[3].warnings, None);
+        // The tooltip keeps the comment the row had to shorten.
+        let tip = row_tip(&rows[3], None);
+        assert!(tip.contains("Start/stop with self-hold"));
+        assert!(tip.contains("1 error"));
+        assert!(!tip.contains('…'));
+    }
+
+    #[test]
+    fn a_warning_is_badged_apart_from_an_error() {
+        let mut warning = problem(0, 0);
+        warning.severity = Severity::Warning;
+        warning.code = "SL-W001";
+        let rows = tree(&project(), &[warning], |_, _| false);
+        assert_eq!(rows[3].errors, None);
+        assert_eq!(rows[3].warnings, Some(1));
+        assert_eq!(rows[2].warnings, Some(1));
+        assert!(row_tip(&rows[3], None).contains("1 warning"));
     }
 
     #[test]
@@ -1470,28 +1648,30 @@ mod tests {
             .iter()
             .find(|row| row.node == Node::Section && row.section == Some(1))
             .expect("the section");
-        assert_eq!(section.errors, Some(2), "both problems belong to it");
+        assert_eq!(section.errors, None);
+        assert_eq!(section.warnings, Some(2), "both warnings belong to it");
         let page = rows
             .iter()
             .find(|row| row.node == Node::Page && row.page == Some(0))
             .expect("page 0");
-        assert_eq!(page.errors, Some(2));
+        assert_eq!(page.warnings, Some(2));
         let step = rows
             .iter()
             .find(|row| row.node == Node::Step && row.step == Some(1))
             .expect("step 1");
-        assert_eq!(step.errors, Some(1));
+        assert_eq!(step.warnings, Some(1));
         let transition = rows
             .iter()
             .find(|row| row.node == Node::Transition)
             .expect("the transition");
-        assert_eq!(transition.errors, Some(1));
+        assert_eq!(transition.warnings, Some(1));
         // The step that was not named stays clean.
         let other = rows
             .iter()
             .find(|row| row.node == Node::Step && row.step == Some(0))
             .expect("step 0");
         assert_eq!(other.errors, None);
+        assert_eq!(other.warnings, None);
         // The transition of the other page is unaffected by page 0's problems.
         let second = rows
             .iter()

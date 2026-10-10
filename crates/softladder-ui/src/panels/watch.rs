@@ -10,15 +10,24 @@
 //! reason next to the field — never a modal. [`parse_watch_target`] is that rule,
 //! and it is unit-tested without a window.
 
-use egui::{RichText, Stroke, Ui};
+use egui::{Color32, CornerRadius, RichText, Sense, Stroke, StrokeKind, Ui};
 use softladder_core::{Project, Severity, Symbol, VarRef};
 
 use crate::app::EditorApp;
 use crate::design::{
     empty_state, mono, pill, section_header, Tokens, TypeScale, RADIUS_CONTROL, SPACE_1, SPACE_2,
 };
+use crate::panels::icons::{self, Icon};
+use crate::panels::table::{self, Column, Spec, Width};
 use crate::panels::tags::data_type;
 use crate::watch::{ValueFormat, WatchRow};
+
+/// A variable being dragged onto the watch table, from a tag row or the ladder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WatchDrag {
+    /// The variable to start watching.
+    pub var: VarRef,
+}
 
 /// The typed target of the "+ add" row, resolved to a variable.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,19 +248,20 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let mut actions = WatchActions::default();
 
     row_counts(app, ui);
+    add_row(app, ui, &mut actions);
+    drop_banner(app, ui);
     if app.watch.is_empty() {
         empty_state(
             ui,
             &tokens,
             "Nothing is being watched",
-            "Type an address such as %MW10 or a tag name into the field below, \
-             or add the element under the cursor from the inspector.",
+            "Type an address such as %MW10 or a tag name into the field above, \
+             drag a tag here, or add the element under the cursor from the inspector.",
             "Values update while the bench runs; Modify writes a value and Force holds it.",
         );
     } else {
         table(app, ui, &mut actions);
     }
-    add_row(app, ui, &mut actions);
     errors(app, ui);
 
     apply(app, actions);
@@ -327,73 +337,207 @@ fn views(app: &EditorApp) -> Vec<RowView> {
         .collect()
 }
 
+/// The columns of the watch table.
+fn columns() -> [Column; 6] {
+    [
+        Column {
+            title: "Address / Tag",
+            width: Width::Flex {
+                weight: 1.4,
+                min: 96.0,
+            },
+        },
+        Column {
+            title: "Type",
+            width: Width::Fixed(64.0),
+        },
+        Column {
+            title: "Value",
+            width: Width::Fixed(64.0),
+        },
+        Column {
+            title: "Format",
+            width: Width::Fixed(84.0),
+        },
+        Column {
+            title: "Modify",
+            width: Width::Fixed(108.0),
+        },
+        Column {
+            title: "Force",
+            width: Width::Fixed(108.0),
+        },
+    ]
+}
+
 /// The table itself.
 fn table(app: &mut EditorApp, ui: &mut Ui, actions: &mut WatchActions) {
     let tokens = app.tokens;
     let live = app.bench.state().is_scanning();
     let rows = views(app);
-    egui::ScrollArea::vertical()
-        .auto_shrink([false, false])
-        .max_height((ui.available_height() - 80.0).max(120.0))
-        .show(ui, |ui| {
-            egui::Grid::new("watch_table")
-                .num_columns(6)
-                .spacing([SPACE_2, SPACE_1])
-                .striped(true)
-                .min_col_width(72.0)
-                .show(ui, |ui| {
-                    for title in [
-                        "Address / Tag",
-                        "Type",
-                        "Value",
-                        "Format",
-                        "Modify",
-                        "Force",
-                    ] {
-                        ui.label(
-                            RichText::new(title)
-                                .size(TypeScale::CAPTION)
-                                .color(tokens.text_dim)
-                                .strong(),
-                        );
-                    }
-                    ui.end_row();
+    let columns = columns();
+    // The cell closure needs `actions`, and the menu does too. They run one
+    // after the other, so the requests land in one cell.
+    let pending = std::cell::RefCell::new(WatchActions::default());
+    table::show(
+        ui,
+        &tokens,
+        Spec {
+            id: "watch-force",
+            columns: &columns,
+            rows: rows.len(),
+        },
+        |index| {
+            rows.get(index)
+                .map(|row| {
+                    format!(
+                        "{} {} {} {}",
+                        row.label(),
+                        row.address,
+                        row.data_type,
+                        row.value
+                    )
+                })
+                .unwrap_or_default()
+        },
+        |index, column| {
+            rows.get(index)
+                .map(|row| match column {
+                    0 => row.label().to_owned(),
+                    1 => row.data_type.to_owned(),
+                    2 => row.value.clone(),
+                    3 => row.format.label().to_owned(),
+                    4 => row.modify.clone(),
+                    _ => row.force.map(i64::from).unwrap_or(-1).to_string(),
+                })
+                .unwrap_or_default()
+        },
+        |index| {
+            rows.get(index)
+                .and_then(|row| row.force.map(|_| tokens.warning.gamma_multiply(0.16)))
+        },
+        |ui, index, column| {
+            let Some(row) = rows.get(index) else {
+                return;
+            };
+            draw_cell(ui, &tokens, live, index, column, row, &pending);
+        },
+        |ui, index| {
+            let Some(row) = rows.get(index) else {
+                return;
+            };
+            if row.force.is_some() && ui.button("Release force").clicked() {
+                pending.borrow_mut().force = Some((index, false));
+                ui.close_menu();
+            }
+            if ui.button("Remove row").clicked() {
+                pending.borrow_mut().remove = Some(index);
+                ui.close_menu();
+            }
+            if ui.button("Copy address").clicked() {
+                ui.ctx().copy_text(row.address.clone());
+                ui.close_menu();
+            }
+        },
+    );
+    let pending = pending.into_inner();
+    // One frame asks for one change of each kind. The menu and the cell can
+    // both set one; the cell wins when both do, because it is the direct control.
+    if actions.format.is_none() {
+        actions.format = pending.format;
+    }
+    if actions.modify_draft.is_none() {
+        actions.modify_draft = pending.modify_draft;
+    }
+    if actions.modify.is_none() {
+        actions.modify = pending.modify;
+    }
+    if actions.force.is_none() {
+        actions.force = pending.force;
+    }
+    if actions.remove.is_none() {
+        actions.remove = pending.remove;
+    }
+}
 
-                    for (index, row) in rows.iter().enumerate() {
-                        ui.vertical(|ui| {
-                            ui.label(
-                                RichText::new(row.label())
-                                    .size(TypeScale::BODY)
-                                    .color(tokens.text),
-                            );
-                            if row.name.is_some() {
-                                ui.label(
-                                    RichText::new(&row.address)
-                                        .monospace()
-                                        .size(TypeScale::CAPTION)
-                                        .color(tokens.text_dim),
-                                );
-                            }
-                        });
-                        ui.label(
-                            RichText::new(row.data_type)
-                                .size(TypeScale::CAPTION)
-                                .color(tokens.text_dim),
-                        );
-                        // The live value: monospaced, and in the live colour
-                        // while the bench is actually scanning.
-                        ui.label(mono(row.value.clone()).color(if live {
-                            tokens.energised
-                        } else {
-                            tokens.text
-                        }));
-                        format_picker(ui, index, row.format, actions);
-                        modify_field(ui, index, &row.modify, actions);
-                        force_controls(ui, &tokens, index, row, actions);
-                        ui.end_row();
-                    }
-                });
-        });
+/// One cell of a watch row.
+fn draw_cell(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    live: bool,
+    index: usize,
+    column: usize,
+    row: &RowView,
+    actions: &std::cell::RefCell<WatchActions>,
+) {
+    match column {
+        0 => {
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(row.label())
+                        .size(TypeScale::BODY)
+                        .color(tokens.text),
+                );
+                if row.name.is_some() {
+                    ui.label(
+                        RichText::new(&row.address)
+                            .monospace()
+                            .size(TypeScale::CAPTION)
+                            .color(tokens.text_dim),
+                    );
+                }
+            });
+        }
+        1 => {
+            ui.label(
+                RichText::new(row.data_type)
+                    .size(TypeScale::CAPTION)
+                    .color(tokens.text_dim),
+            );
+        }
+        2 => {
+            ui.label(mono(row.value.clone()).color(if live {
+                tokens.energised
+            } else {
+                tokens.text
+            }));
+        }
+        3 => format_picker(ui, index, row.format, &mut actions.borrow_mut()),
+        4 => modify_field(ui, index, &row.modify, &mut actions.borrow_mut()),
+        _ => force_controls(ui, tokens, index, row, &mut actions.borrow_mut()),
+    }
+}
+
+/// Shown only while a tag or a ladder element is being dragged.
+fn drop_banner(app: &mut EditorApp, ui: &mut Ui) {
+    if !egui::DragAndDrop::has_payload_of_type::<WatchDrag>(ui.ctx()) {
+        return;
+    }
+    let tokens = app.tokens;
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::hover());
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(RADIUS_CONTROL),
+        tokens.accent_soft,
+        Stroke::new(1.0_f32, tokens.accent),
+        StrokeKind::Middle,
+    );
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "Drop to watch this variable",
+        egui::FontId::new(TypeScale::CAPTION, egui::FontFamily::Proportional),
+        tokens.accent,
+    );
+    if let Some(drag) = response.dnd_release_payload::<WatchDrag>() {
+        let var = drag.var.clone();
+        if push_row(&mut app.watch, var.clone()) {
+            app.note(&format!("watching {var}"));
+        } else {
+            app.note(&format!("{var} is already in the watch table"));
+        }
+    }
 }
 
 /// The format picker of one row.
@@ -439,7 +583,10 @@ fn modify_field(ui: &mut Ui, index: usize, current: &str, actions: &mut WatchAct
     });
 }
 
-/// The per-row force toggle and its remove button.
+/// The per-row force lock and its remove button.
+///
+/// A forced row is amber, and the lock is filled in the same colour, so a held
+/// value cannot be mistaken for a live one.
 fn force_controls(
     ui: &mut Ui,
     tokens: &Tokens,
@@ -448,14 +595,12 @@ fn force_controls(
     actions: &mut WatchActions,
 ) {
     ui.horizontal(|ui| {
-        let mut armed = row.force.is_some();
-        let caption = if armed { "FORCED" } else { "force" };
-        if ui
-            .toggle_value(&mut armed, caption)
-            .on_hover_text("Hold this value while the bench runs (click again to release)")
-            .changed()
+        let armed = row.force.is_some();
+        if force_switch(ui, tokens, armed)
+            .on_hover_text("Hold this value while the bench runs. Click again to release it.")
+            .clicked()
         {
-            actions.force = Some((index, armed));
+            actions.force = Some((index, !armed));
         }
         if let Some(value) = row.force {
             ui.label(
@@ -474,6 +619,43 @@ fn force_controls(
         }
         let _ = &row.var;
     });
+}
+
+/// The force control: an outline until it is armed, then a filled amber lock.
+fn force_switch(ui: &mut Ui, tokens: &Tokens, armed: bool) -> egui::Response {
+    let text = if armed { "Forced" } else { "Force" };
+    let ink = if armed { Color32::WHITE } else { tokens.text };
+    let font = egui::FontId::new(TypeScale::CAPTION, egui::FontFamily::Proportional);
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, ink);
+    let width = galley.size().x + 22.0;
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(width, galley.size().y + SPACE_1), Sense::click());
+    let fill = if armed {
+        tokens.warning
+    } else if response.hovered() {
+        tokens.surface
+    } else {
+        Color32::TRANSPARENT
+    };
+    let stroke = Stroke::new(1.0_f32, if armed { tokens.warning } else { tokens.border });
+    ui.painter().rect(
+        rect,
+        CornerRadius::same(RADIUS_CONTROL),
+        fill,
+        stroke,
+        StrokeKind::Middle,
+    );
+    let icon = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 10.0, rect.center().y),
+        egui::vec2(12.0, 12.0),
+    );
+    icons::draw_ink(ui.painter(), icon, ink, Icon::Lock);
+    ui.painter().galley(
+        egui::pos2(icon.right() + 2.0, rect.center().y - galley.size().y / 2.0),
+        galley,
+        ink,
+    );
+    response
 }
 
 /// The "+ add" row, which accepts a typed address or tag name.
@@ -544,7 +726,7 @@ fn errors(app: &mut EditorApp, ui: &mut Ui) {
                     ui.label(
                         RichText::new(format!(
                             "{} value(s) are forced and do not follow the program. \
-                             Release a force with its row toggle.",
+                             Release a force with its lock.",
                             app.forces.len()
                         ))
                         .size(TypeScale::CAPTION)

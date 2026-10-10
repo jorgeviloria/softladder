@@ -68,6 +68,9 @@ maintenance technician who has used one PLC brand expects to find.
 ```
 
 * **Left**: project tree (top pane) and inspector (bottom pane), both resizable, both collapsible.
+  Every row has a tooltip with the full name and comment, so a narrow tree does not hide them.
+  A trailing number is what the row contains (networks, pages, tags); errors and warnings are
+  separate badges. Dragging a ladder element or a tag onto **Watch & force** adds it to the table.
 * **Command bar**: one row of 28 pt icon buttons under the menu, grouped by hairlines (history, file,
   run, view). Every button has a tooltip with its name, shortcut and a one-line description. Run/Stop
   is the only labelled button: it is filled in the colour of what it will do, because the run state
@@ -124,7 +127,7 @@ toggle, not a separate design.
 * **Icons**: a small hand-drawn vector set (16 px grid): contact NO/NC, edge, coil, set/reset, timer,
   counter, register, compare, operate, connection, jump, call, tag, watch, bench, play, stop, step,
   save, open, new, undo, redo, cut, copy, paste, zoom in/out/reset, grid, cross-reference, warning,
-  error, info, folder, plc. Drawn with `egui` paths, no image assets.
+  error, info, folder, plc, lock. Drawn with `egui` paths, no image assets.
 
 ## 5. Ladder editor
 
@@ -165,9 +168,11 @@ toggle, not a separate design.
 ## 6. PLC tags (the symbol table, promoted)
 
 A first-class table, not a dialog: columns **Name**, **Type**, **Address**, **Comment**, **Used by**
-(count, clickable → cross-reference). Rows are editable in place, `+` adds, `Del` removes, invalid
-names or addresses are refused with the reason on the row. The canvas, the watch table and the bench
-all display the **name** and fall back to the address.
+(count, clickable → the watch table). The header stays put, rows are zebra-striped, a filter narrows
+them and a column title sorts them. Rows are editable in place. The add bar sits above the rows.
+The row menu watches or deletes a tag, and the grip on a bound tag drags it onto Watch & force.
+An address that does not parse is refused with the reason in the status note. The canvas, the watch
+table and the bench all display the **name** and fall back to the address.
 
 Data types are derived from the variable kind: `Bool` for `%I/%Q/%M/%QLED/%S`, `Int` for
 `%MW/%IW/%QW`, `Timer` for `%TM`, `Counter` for `%C`, `Register` for `%R`, `Step` for `%X`.
@@ -176,9 +181,12 @@ Data types are derived from the variable kind: `Bool` for `%I/%Q/%M/%QLED/%S`, `
 
 A table with **Address/Tag**, **Type**, **Value** (live, monospaced), **Format** (`Bool`, `Signed`,
 `Hex`, `Real`), **Modify value** (typed in, applied with a button or `Enter`) and **Force**
-(a per-row toggle; the status bar shows `N forced` in `warning` while any force is active). Rows can
-be added by typing an address, by picking a tag, or by right-clicking an element in the canvas
-("Add to watch table"). Monitoring runs while the bench runs; values update in place.
+(a lock; while it is armed the row and the lock are `warning`, and the status bar shows `N forced`).
+The same table chrome as the tag list: fixed header, zebra rows, filter, sort and a row menu
+(release, remove, copy the address). The add bar sits above the rows. A row can be added by typing
+an address, by picking a tag, by right-clicking an element ("Add to watch table"), or by dragging
+the element or its tag onto the Watch tab, the tree row or the drop band. Monitoring runs while the
+bench runs; values update in place.
 
 ## 8. Bench (the HMI view)
 

@@ -5,11 +5,12 @@
 //! (a [`softladder_core::Symbol`] bound to a [`softladder_core::VarRef`]); this
 //! document promotes it from a dialog to a first-class table. See `docs/UX.md` §6.
 
-use egui::{Align, Layout, RichText, Ui};
+use egui::{RichText, Ui};
 use softladder_core::{Symbol, VarKind, VarRef};
 
 use crate::app::{EditorApp, SymbolDraft};
-use crate::design::{mono, section_header, TypeScale, SPACE_1, SPACE_2};
+use crate::design::{mono, section_header, TypeScale, SPACE_1};
+use crate::panels::table::{self, Column, Spec, Width};
 
 /// The data-type name a variable kind maps to, the way a tag table shows it.
 pub fn data_type(var: &VarRef) -> &'static str {
@@ -52,153 +53,50 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     tokens_and_title(app, ui);
     let tokens = app.tokens;
 
-    // A header row, then one row per tag: the table look every PLC tool has.
     let mut add: Option<Symbol> = None;
-    let mut remove: Option<usize> = None;
-    let mut rename: Option<(usize, Symbol)> = None;
-    let mut watch: Option<VarRef> = None;
+    let symbols: Vec<Symbol> = app.project().symbols.clone();
+    let prepared = prepare(app, &symbols);
+    let selected = app.selected_tag;
+    // The cell callback and the row menu both record actions, and they cannot
+    // mutably borrow the same slot at once, so the slot sits in a `RefCell`.
+    let actions = std::cell::RefCell::new(TagActions::default());
 
-    egui::Grid::new("plc_tags")
-        .num_columns(5)
-        .spacing([SPACE_2, SPACE_1])
-        .striped(true)
-        .show(ui, |ui| {
-            for title in ["Name", "Type", "Address", "Comment", "Used by"] {
-                ui.label(
-                    RichText::new(title)
-                        .size(TypeScale::CAPTION)
-                        .color(tokens.text_dim)
-                        .strong(),
-                );
-            }
-            ui.end_row();
-
-            let symbols: Vec<Symbol> = app.project().symbols.clone();
-            for (index, symbol) in symbols.iter().enumerate() {
-                let address = symbol
-                    .var
-                    .as_ref()
-                    .map(ToString::to_string)
-                    .unwrap_or_else(|| "—".to_owned());
-                let selected = app.selected_tag == Some(index);
-                let mut remove_row = false;
-                let mut row_draft = SymbolDraft::from_symbol(symbol);
-
-                let name_response = ui.add(
-                    egui::TextEdit::singleline(&mut row_draft.name)
-                        .desired_width(110.0)
-                        .text_color(if selected { tokens.accent } else { tokens.text }),
-                );
-                if name_response.gained_focus() {
-                    app.selected_tag = Some(index);
-                }
-                ui.label(mono(data_type_of(symbol)));
-                ui.label(mono(address.clone()));
-                let comment = ui.add(
-                    egui::TextEdit::singleline(&mut row_draft.comment).desired_width(f32::INFINITY),
-                );
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let count = symbol
-                        .var
-                        .as_ref()
-                        .map(|var| used_by(app, var))
-                        .unwrap_or(0);
-                    let used = ui
-                        .add(
-                            egui::Label::new(
-                                RichText::new(count.to_string())
-                                    .size(TypeScale::CAPTION)
-                                    .color(if count == 0 {
-                                        tokens.warning
-                                    } else {
-                                        tokens.text_dim
-                                    }),
-                            )
-                            .sense(egui::Sense::click()),
-                        )
-                        .on_hover_text("Watch this tag in the Watch & force document");
-                    if used.clicked() && symbol.var.is_some() {
-                        watch = symbol.var.clone();
-                    }
-                    if ui
-                        .small_button("✕")
-                        .on_hover_text("Delete this tag")
-                        .clicked()
-                    {
-                        remove_row = true;
-                    }
-                });
-                ui.end_row();
-
-                if comment.changed() {
-                    row_draft.var = address.clone();
-                    if let Ok(updated) = row_draft.to_symbol() {
-                        rename = Some((index, updated));
-                    }
-                }
-                // A renamed tag is applied through the editor's symbol table,
-                // which validates every row before it writes anything.
-                if name_response.lost_focus() && row_draft.name != symbol.name {
-                    row_draft.var = address.clone();
-                    if let Ok(updated) = row_draft.to_symbol() {
-                        rename = Some((index, updated));
-                    }
-                }
-                if remove_row {
-                    remove = Some(index);
-                }
-            }
-
-            // The "add a tag" row.
-            ui.label("＋");
-            ui.label(
-                RichText::new("Bool")
-                    .size(TypeScale::CAPTION)
-                    .color(tokens.text_dim),
-            );
-            ui.add(
-                egui::TextEdit::singleline(&mut app.tag_draft.1)
-                    .hint_text("%I0")
-                    .desired_width(90.0)
-                    .font(egui::TextStyle::Monospace),
-            );
-            ui.add(
-                egui::TextEdit::singleline(&mut app.tag_draft.2)
-                    .hint_text("comment")
-                    .desired_width(f32::INFINITY),
-            );
-            let can_add = !app.tag_draft.1.trim().is_empty();
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui
-                    .add_enabled(can_add, egui::Button::new("Add"))
-                    .on_hover_text("Add a tag for the typed address")
-                    .clicked()
-                {
-                    let name = app.tag_draft.0.clone();
-                    let var = app.tag_draft.1.clone();
-                    let comment = app.tag_draft.2.clone();
-                    if let Ok(var) = var.trim().parse::<VarRef>() {
-                        let name = if name.trim().is_empty() {
-                            format!("tag{}", app.project().symbols.len() + 1)
-                        } else {
-                            name
-                        };
-                        add = Some(Symbol {
-                            name,
-                            var: Some(var),
-                            comment,
-                            unit: None,
-                        });
-                    }
-                }
-                ui.add(
-                    egui::TextEdit::singleline(&mut app.tag_draft.0)
-                        .hint_text("name")
-                        .desired_width(120.0),
-                );
-            });
-            ui.end_row();
-        });
+    add_bar(app, ui, &mut add);
+    let columns = columns();
+    table::show(
+        ui,
+        &tokens,
+        Spec {
+            id: "plc-tags",
+            columns: &columns,
+            rows: symbols.len(),
+        },
+        |index| {
+            prepared
+                .get(index)
+                .map(|row| row.haystack.clone())
+                .unwrap_or_default()
+        },
+        |index, column| {
+            prepared
+                .get(index)
+                .and_then(|row| row.keys.get(column).cloned())
+                .unwrap_or_default()
+        },
+        |index| (selected == Some(index)).then_some(tokens.accent_soft),
+        |ui, index, column| {
+            let Some(symbol) = symbols.get(index) else {
+                return;
+            };
+            draw_cell(app, ui, &tokens, index, column, symbol, &actions);
+        },
+        |ui, index| row_menu(ui, symbols.get(index), index, &actions),
+    );
+    let TagActions {
+        remove,
+        rename,
+        watch,
+    } = actions.into_inner();
 
     ui.add_space(SPACE_1);
     ui.label(
@@ -242,6 +140,221 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     }
 }
 
+/// What the table asked for while it was drawing.
+#[derive(Default)]
+struct TagActions {
+    /// A row to delete.
+    remove: Option<usize>,
+    /// A row whose name or comment changed.
+    rename: Option<(usize, Symbol)>,
+    /// A variable to open in the watch table.
+    watch: Option<VarRef>,
+}
+
+/// One tag, reduced to the strings the filter and the sort need.
+struct Prepared {
+    /// Name, type, address and comment, joined.
+    haystack: String,
+    /// One sort key per column.
+    keys: [String; 5],
+}
+
+/// Builds the filter and sort text before the table borrows the editor.
+fn prepare(app: &EditorApp, symbols: &[Symbol]) -> Vec<Prepared> {
+    symbols
+        .iter()
+        .map(|symbol| {
+            let address = symbol
+                .var
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "—".to_owned());
+            let kind = data_type_of(symbol);
+            let used = symbol
+                .var
+                .as_ref()
+                .map(|var| used_by(app, var))
+                .unwrap_or(0);
+            Prepared {
+                haystack: format!("{} {kind} {address} {}", symbol.name, symbol.comment),
+                keys: [
+                    symbol.name.clone(),
+                    kind.to_owned(),
+                    address,
+                    symbol.comment.clone(),
+                    used.to_string(),
+                ],
+            }
+        })
+        .collect()
+}
+
+/// The bar above the table: name, address, comment and Add.
+fn add_bar(app: &mut EditorApp, ui: &mut Ui, add: &mut Option<Symbol>) {
+    let tokens = app.tokens;
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("＋")
+                .size(TypeScale::BODY)
+                .color(tokens.text_dim),
+        );
+        ui.add(
+            egui::TextEdit::singleline(&mut app.tag_draft.0)
+                .hint_text("name")
+                .desired_width(120.0),
+        );
+        ui.add(
+            egui::TextEdit::singleline(&mut app.tag_draft.1)
+                .hint_text("%I0")
+                .desired_width(90.0)
+                .font(egui::TextStyle::Monospace),
+        );
+        ui.add(
+            egui::TextEdit::singleline(&mut app.tag_draft.2)
+                .hint_text("comment")
+                .desired_width(160.0),
+        );
+        let can_add = !app.tag_draft.1.trim().is_empty();
+        if ui
+            .add_enabled(can_add, egui::Button::new("Add"))
+            .on_hover_text("Add a tag for the typed address")
+            .clicked()
+        {
+            match app.tag_draft.1.trim().parse::<VarRef>() {
+                Ok(var) => {
+                    let name = if app.tag_draft.0.trim().is_empty() {
+                        format!("tag{}", app.project().symbols.len() + 1)
+                    } else {
+                        app.tag_draft.0.clone()
+                    };
+                    *add = Some(Symbol {
+                        name,
+                        var: Some(var),
+                        comment: app.tag_draft.2.clone(),
+                        unit: None,
+                    });
+                }
+                Err(_) => app.note(&format!("`{}` is not an address", app.tag_draft.1.trim())),
+            }
+        }
+    });
+    ui.add_space(SPACE_1);
+}
+
+/// One cell of a tag row.
+fn draw_cell(
+    app: &mut EditorApp,
+    ui: &mut Ui,
+    tokens: &crate::design::Tokens,
+    index: usize,
+    column: usize,
+    symbol: &Symbol,
+    actions: &std::cell::RefCell<TagActions>,
+) {
+    let address = symbol
+        .var
+        .as_ref()
+        .map(ToString::to_string)
+        .unwrap_or_else(|| "—".to_owned());
+    let selected = app.selected_tag == Some(index);
+    match column {
+        0 => {
+            if let Some(var) = symbol.var.clone() {
+                let drag_id = ui.make_persistent_id(("tag-drag", index));
+                ui.dnd_drag_source(drag_id, crate::panels::watch::WatchDrag { var }, |ui| {
+                    ui.label(
+                        RichText::new("⠿")
+                            .size(TypeScale::CAPTION)
+                            .color(tokens.text_dim),
+                    )
+                    .on_hover_text("Drag onto Watch & force");
+                });
+            }
+            let mut draft = SymbolDraft::from_symbol(symbol);
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut draft.name)
+                    .id_source(("tag-name", index))
+                    .desired_width(ui.available_width())
+                    .text_color(if selected { tokens.accent } else { tokens.text }),
+            );
+            if response.gained_focus() {
+                app.selected_tag = Some(index);
+            }
+            if response.lost_focus() && draft.name != symbol.name {
+                draft.var = address;
+                if let Ok(updated) = draft.to_symbol() {
+                    actions.borrow_mut().rename = Some((index, updated));
+                }
+            }
+        }
+        1 => {
+            ui.label(mono(data_type_of(symbol)));
+        }
+        2 => {
+            ui.label(mono(address));
+        }
+        3 => {
+            let mut draft = SymbolDraft::from_symbol(symbol);
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut draft.comment)
+                    .id_source(("tag-comment", index))
+                    .desired_width(ui.available_width()),
+            );
+            if response.changed() {
+                draft.var = address;
+                if let Ok(updated) = draft.to_symbol() {
+                    actions.borrow_mut().rename = Some((index, updated));
+                }
+            }
+        }
+        _ => {
+            let count = symbol
+                .var
+                .as_ref()
+                .map(|var| used_by(app, var))
+                .unwrap_or(0);
+            let used = ui
+                .add(
+                    egui::Label::new(
+                        RichText::new(count.to_string())
+                            .size(TypeScale::CAPTION)
+                            .color(if count == 0 {
+                                tokens.warning
+                            } else {
+                                tokens.text_dim
+                            }),
+                    )
+                    .sense(egui::Sense::click()),
+                )
+                .on_hover_text("Watch this tag");
+            if used.clicked() {
+                actions.borrow_mut().watch = symbol.var.clone();
+            }
+        }
+    }
+}
+
+/// The row menu: watch the tag, or delete it.
+fn row_menu(
+    ui: &mut Ui,
+    symbol: Option<&Symbol>,
+    index: usize,
+    actions: &std::cell::RefCell<TagActions>,
+) {
+    let bound = symbol.and_then(|symbol| symbol.var.clone());
+    if ui
+        .add_enabled(bound.is_some(), egui::Button::new("Watch"))
+        .clicked()
+    {
+        actions.borrow_mut().watch = bound;
+        ui.close_menu();
+    }
+    if ui.button("Delete").clicked() {
+        actions.borrow_mut().remove = Some(index);
+        ui.close_menu();
+    }
+}
+
 /// The type name of a symbol's variable.
 fn data_type_of(symbol: &Symbol) -> &'static str {
     symbol.var.as_ref().map_or("—", data_type)
@@ -268,6 +381,35 @@ fn tokens_and_title(app: &mut EditorApp, ui: &mut Ui) {
             .color(app.tokens.text_dim),
     );
     ui.add_space(SPACE_1);
+}
+
+/// The columns of the tag table.
+fn columns() -> [Column; 5] {
+    [
+        Column {
+            title: "Name",
+            width: Width::Fixed(120.0),
+        },
+        Column {
+            title: "Type",
+            width: Width::Fixed(72.0),
+        },
+        Column {
+            title: "Address",
+            width: Width::Fixed(88.0),
+        },
+        Column {
+            title: "Comment",
+            width: Width::Flex {
+                weight: 1.0,
+                min: 80.0,
+            },
+        },
+        Column {
+            title: "Used by",
+            width: Width::Fixed(64.0),
+        },
+    ]
 }
 
 #[cfg(test)]

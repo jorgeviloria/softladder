@@ -76,6 +76,8 @@ pub enum Icon {
     Sun,
     /// The command palette: a magnifier over a list.
     Search,
+    /// A closed padlock, for a forced value.
+    Lock,
 }
 
 /// The number of points a tree row icon is drawn in.
@@ -438,6 +440,27 @@ pub fn draw_ink(painter: &Painter, rect: Rect, ink: Color32, icon: Icon) {
                 );
             }
         }
+        Icon::Lock => {
+            painter.rect(
+                Rect::from_min_max(at(0.22, 0.46), at(0.78, 0.90)),
+                CornerRadius::same(1),
+                Color32::TRANSPARENT,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            painter.line_segment([at(0.32, 0.46), at(0.32, 0.34)], stroke);
+            painter.line_segment([at(0.68, 0.46), at(0.68, 0.34)], stroke);
+            painter.add(Shape::line(
+                (0..=8)
+                    .map(|step| {
+                        let angle =
+                            std::f32::consts::PI + std::f32::consts::PI * (step as f32 / 8.0);
+                        at(0.50 + 0.18 * angle.cos(), 0.34 + 0.16 * angle.sin())
+                    })
+                    .collect(),
+                stroke,
+            ));
+        }
     }
 }
 
@@ -543,6 +566,7 @@ mod tests {
             Icon::Moon,
             Icon::Sun,
             Icon::Search,
+            Icon::Lock,
         ] {
             for side in [1.0_f32, SMALL, 20.0, 32.0] {
                 paint(

@@ -1736,6 +1736,15 @@ fn handle_pointer(
             });
             ui.ctx()
                 .data_mut(|data| data.insert_temp(drag_id, Some(index)));
+            // A variable under the pointer can be dropped on Watch & force.
+            // Releasing it back on the sheet still moves the element.
+            if let Some(var) = networks
+                .get(index)
+                .and_then(|network| queries::element_at_cell(&network.rung, col, row))
+                .and_then(|element| element.var.clone())
+            {
+                response.dnd_set_drag_payload(crate::panels::watch::WatchDrag { var });
+            }
         }
     }
     if response.dragged_by(primary) {
@@ -1749,10 +1758,16 @@ fn handle_pointer(
         }
     }
     if response.drag_stopped_by(primary) {
+        let inside = response.contains_pointer();
         let source: Option<usize> = ui.ctx().data(|data| data.get_temp(drag_id)).flatten();
         ui.ctx()
             .data_mut(|data| data.insert_temp(drag_id, None::<usize>));
         if let Some(drag) = app.drag.take() {
+            if !inside {
+                // The pointer went up over another panel. That panel watches
+                // the variable; the element stays in its cell.
+                return;
+            }
             let Some(rung) = source
                 .and_then(|index| networks.get(index))
                 .map(|network| network.rung.id)
@@ -2072,6 +2087,23 @@ fn context_menu(
     }
 
     ui.separator();
+    let watch_var = element.as_ref().and_then(|element| element.var.clone());
+    if ui
+        .add_enabled(watch_var.is_some(), egui::Button::new("Add to watch table"))
+        .on_hover_text("Monitor this variable in the Watch & force document")
+        .on_disabled_hover_text("This element has no variable to watch")
+        .clicked()
+    {
+        if let Some(var) = watch_var {
+            if crate::panels::watch::push_row(&mut app.watch, var.clone()) {
+                app.note(&format!("watching {var}"));
+            } else {
+                app.note(&format!("{var} is already in the watch table"));
+            }
+            app.centre_tab = CentreTab::Watch;
+        }
+        ui.close_menu();
+    }
     let tag = element
         .as_ref()
         .and_then(|element| element.var.as_ref())

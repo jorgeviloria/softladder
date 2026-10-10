@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — data tables (UI/UX U4)
+
+### Added
+
+- **One data table** for the tag list, the watch table and the problems list: a fixed header,
+  zebra rows, a filter, click-to-sort columns and a per-row menu.
+- **Drag a variable onto Watch & force**, from a tag's grip, from the ladder (drop it on the Watch
+  tab or the project tree) or from the cell menu. A forced row is amber, and its control is a lock.
+
+### Changed
+
+- The project tree's tooltip carries the full name and comment. Errors and warnings are separate
+  badges; the trailing number is what the row contains.
+- The tag and watch add bars sit above the rows, so they stay reachable while the list scrolls.
+
 ## [Unreleased] — schematic ladder (UI/UX U3)
 
 ### Changed

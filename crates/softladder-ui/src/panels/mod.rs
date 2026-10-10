@@ -21,6 +21,7 @@ pub mod properties;
 pub mod right;
 pub mod shortcuts;
 pub mod status;
+pub mod table;
 pub mod tags;
 pub mod watch;
 

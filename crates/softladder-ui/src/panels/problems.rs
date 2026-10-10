@@ -7,14 +7,15 @@
 //! (`SL-W030`…`SL-W033`), because a project imported from ClassicLadder must
 //! report what was skipped rather than hide it.
 
-use egui::{Align, Layout, RichText, Sense, Stroke, Ui};
+use egui::{RichText, Sense, Stroke, Ui};
 use softladder_core::{Diagnostic, Project, SectionLanguage, Severity};
 
 use crate::app::{CentreTab, EditorApp};
 use crate::design::{
-    empty_state, pill, section_header, Tokens, TypeScale, RADIUS_CONTROL, SPACE_1, SPACE_2,
+    empty_state, pill, section_header, Tokens, TypeScale, RADIUS_CONTROL, SPACE_1,
 };
 use crate::panels::icons::{self, Icon};
+use crate::panels::table::{self, Column, Spec, Width};
 use crate::queries;
 
 /// The sequential element an SFC diagnostic names.
@@ -274,81 +275,60 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         return;
     }
 
-    let mut go: Option<(u32, Option<(u8, u8)>)> = None;
-    let mut go_sfc: Option<SfcTarget> = None;
-    egui::ScrollArea::vertical()
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            egui::Grid::new("problems_table")
-                .num_columns(4)
-                .spacing([SPACE_2, SPACE_1])
-                .striped(true)
-                .min_col_width(60.0)
-                .show(ui, |ui| {
-                    for title in ["", "Code", "Message", "Location"] {
-                        ui.label(
-                            RichText::new(title)
-                                .size(TypeScale::CAPTION)
-                                .color(tokens.text_dim)
-                                .strong(),
-                        );
-                    }
-                    ui.end_row();
-
-                    for row in &rows {
-                        let colour = tokens.severity(row.severity);
-                        let response = severity_cell(ui, colour, row.severity);
-                        ui.label(
-                            RichText::new(&row.code)
-                                .monospace()
-                                .size(TypeScale::CAPTION)
-                                .color(colour)
-                                .strong(),
-                        );
-                        ui.label(
-                            RichText::new(&row.message)
-                                .size(TypeScale::BODY)
-                                .color(tokens.text),
-                        );
-                        let target = ui
-                            .with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                let location = ui
-                                    .label(
-                                        RichText::new(&row.location)
-                                            .size(TypeScale::CAPTION)
-                                            .color(tokens.text_dim),
-                                    )
-                                    .on_hover_text(if row.sfc.is_some() {
-                                        "Click to show the offending page of the chart"
-                                    } else {
-                                        "Click to show the offending rung"
-                                    });
-                                if row.rung.is_some() || row.sfc.is_some() {
-                                    let (rect, _) = ui.allocate_exact_size(
-                                        egui::vec2(12.0, 12.0),
-                                        Sense::hover(),
-                                    );
-                                    let icon = if row.sfc.is_some() {
-                                        Icon::Section
-                                    } else {
-                                        Icon::Rung
-                                    };
-                                    icons::draw(ui.painter(), rect, &tokens, icon);
-                                }
-                                location
-                            })
-                            .inner;
-                        if response.clicked() || target.clicked() {
-                            if row.sfc.is_some() {
-                                go_sfc = row.sfc;
-                            } else if row.rung.is_some() {
-                                go = Some((row.rung.unwrap_or(0), row.cell));
-                            }
-                        }
-                        ui.end_row();
-                    }
-                });
-        });
+    let columns = problem_columns();
+    let navigation = std::cell::RefCell::new(ProblemJump::default());
+    table::show(
+        ui,
+        &tokens,
+        Spec {
+            id: "problems",
+            columns: &columns,
+            rows: rows.len(),
+        },
+        |index| {
+            rows.get(index)
+                .map(|row| {
+                    format!(
+                        "{} {} {} {}",
+                        severity_label(row.severity),
+                        row.code,
+                        row.message,
+                        row.location
+                    )
+                })
+                .unwrap_or_default()
+        },
+        |index, column| {
+            rows.get(index)
+                .map(|row| match column {
+                    0 => severity_rank(row.severity).to_string(),
+                    1 => row.code.clone(),
+                    2 => row.message.clone(),
+                    _ => row.location.clone(),
+                })
+                .unwrap_or_default()
+        },
+        |_| None,
+        |ui, index, column| {
+            let Some(row) = rows.get(index) else {
+                return;
+            };
+            if draw_problem_cell(ui, &tokens, column, row) {
+                navigation.borrow_mut().remember(row);
+            }
+        },
+        |ui, index| {
+            if ui.button("Show in the program").clicked() {
+                if let Some(row) = rows.get(index) {
+                    navigation.borrow_mut().remember(row);
+                }
+                ui.close_menu();
+            }
+        },
+    );
+    let jump = navigation.into_inner();
+    let go_sfc = jump.sfc;
+    let go = jump.ladder;
 
     if let Some(target) = go_sfc {
         open_sequential(app, target);
@@ -381,18 +361,136 @@ fn open_sequential(app: &mut EditorApp, target: SfcTarget) {
     crate::sfc::focus(app, page, selection);
 }
 
+/// The columns of the problems table.
+fn problem_columns() -> [Column; 4] {
+    [
+        Column {
+            title: "Severity",
+            width: Width::Fixed(88.0),
+        },
+        Column {
+            title: "Code",
+            width: Width::Fixed(72.0),
+        },
+        Column {
+            title: "Message",
+            width: Width::Flex {
+                weight: 1.4,
+                min: 120.0,
+            },
+        },
+        Column {
+            title: "Location",
+            width: Width::Flex {
+                weight: 1.0,
+                min: 120.0,
+            },
+        },
+    ]
+}
+
+/// Sort rank: errors first, then warnings, then notes.
+fn severity_rank(severity: Severity) -> u8 {
+    match severity {
+        Severity::Error => 0,
+        Severity::Warning => 1,
+        Severity::Info => 2,
+    }
+}
+
+/// Where a click in the table asked to go.
+#[derive(Default)]
+struct ProblemJump {
+    /// A ladder rung and, when the message names one, its cell.
+    ladder: Option<(u32, Option<(u8, u8)>)>,
+    /// A sequential element.
+    sfc: Option<SfcTarget>,
+}
+
+impl ProblemJump {
+    /// Records the place `row` points at.
+    fn remember(&mut self, row: &ProblemRow) {
+        if row.sfc.is_some() {
+            self.sfc = row.sfc;
+        } else if row.rung.is_some() {
+            self.ladder = Some((row.rung.unwrap_or(0), row.cell));
+        }
+    }
+}
+
+/// One cell. Returns `true` when the operator clicked it to jump.
+fn draw_problem_cell(ui: &mut Ui, tokens: &Tokens, column: usize, row: &ProblemRow) -> bool {
+    let colour = tokens.severity(row.severity);
+    match column {
+        0 => severity_cell(ui, colour, row.severity).clicked(),
+        1 => ui
+            .label(
+                RichText::new(&row.code)
+                    .monospace()
+                    .size(TypeScale::CAPTION)
+                    .color(colour)
+                    .strong(),
+            )
+            .clicked(),
+        2 => ui
+            .add(
+                egui::Label::new(
+                    RichText::new(&row.message)
+                        .size(TypeScale::BODY)
+                        .color(tokens.text),
+                )
+                .sense(Sense::click()),
+            )
+            .on_hover_text("Show this in the program")
+            .clicked(),
+        _ => {
+            let response = ui
+                .horizontal(|ui| {
+                    if row.rung.is_some() || row.sfc.is_some() {
+                        let (rect, _) =
+                            ui.allocate_exact_size(egui::vec2(12.0, 12.0), Sense::hover());
+                        let icon = if row.sfc.is_some() {
+                            Icon::Section
+                        } else {
+                            Icon::Rung
+                        };
+                        icons::draw(ui.painter(), rect, tokens, icon);
+                    }
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&row.location)
+                                .size(TypeScale::CAPTION)
+                                .color(tokens.text_dim),
+                        )
+                        .sense(Sense::click()),
+                    )
+                })
+                .inner
+                .on_hover_text(if row.sfc.is_some() {
+                    "Click to show the offending page of the chart"
+                } else {
+                    "Click to show the offending rung"
+                });
+            response.clicked()
+        }
+    }
+}
+
 /// The severity cell: a mark and the word, so the list is readable in greyscale.
 fn severity_cell(ui: &mut Ui, colour: egui::Color32, severity: Severity) -> egui::Response {
     ui.horizontal(|ui| {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), Sense::hover());
         icons::severity_mark(ui.painter(), rect, colour, severity_mark(severity));
-        ui.label(
-            RichText::new(severity_label(severity))
-                .size(TypeScale::CAPTION)
-                .color(colour),
-        );
+        ui.add(
+            egui::Label::new(
+                RichText::new(severity_label(severity))
+                    .size(TypeScale::CAPTION)
+                    .color(colour),
+            )
+            .sense(Sense::click()),
+        )
     })
-    .response
+    .inner
 }
 
 /// The summary line and the freshness of the list.
