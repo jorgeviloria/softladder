@@ -35,5 +35,7 @@ pub use scan::{
     VarStore,
 };
 pub use sfc::{SequentialPage, Step, Transition};
-pub use sim::{PanelState, SimAnalog, SimGauge, SimLamp, SimReading, SimSwitch, SimulationPanel};
+pub use sim::{
+    LampColour, PanelState, SimAnalog, SimGauge, SimLamp, SimReading, SimSwitch, SimulationPanel,
+};
 pub use vars::{Accessor, VarKind, VarParseError, VarRef};

@@ -143,6 +143,10 @@ byte-identical to loading and saving it as v2.
 | Change | Required action |
 | --- | --- |
 | Additive optional field | keep `schema_version`, add `#[serde(default)]` |
+
+Bench widgets use that rule. A lamp may carry `colour` (`Green`, `Amber`, `Red` or `Blue`),
+omitted when it is green. A slider or a gauge may carry `unit`, omitted when it is empty. Older
+files load with a green pilot and a bare number. `schema_version` stays 2.
 | Rename/retype/remove field | bump `schema_version`, add a migration |
 | Semantic change of an existing element | bump `schema_version`, add a migration + ADR |
 

@@ -84,10 +84,13 @@ and is saved with it; the operator's positions do not (they are runtime state in
 
 - **Switches** drive `%I` inputs; a widget marked *momentary* springs back after one scan, so it
   behaves like a real push-button.
-- **Lamps** follow `%Q` outputs.
+- **Lamps** follow `%Q` outputs. Each lamp has a colour (green, amber, red or blue).
 - **Sliders** drive `%IW` values, **gauges** follow `%QW` values, both clamped to their range.
-- *Auto-fill* builds a widget for every physical variable the program uses and labels it with the
-  bound symbol, so a project without a bench is one click from being commissionable.
+  Either may carry an engineering unit, printed next to the readout.
+- *Auto-fill* builds a widget for every physical variable the program uses, labels it with the
+  bound symbol, guesses a lamp colour from that name and copies the symbol's unit.
+- Widgets that share a tag prefix sit in one zone. The trend under the screen records each scan;
+  outputs are shown until the operator changes the set, and a new run clears the history.
 
 While running, each cycle applies the bench to the input image, scans once with the simulated clock,
 releases momentary buttons and reads the outputs back. Stopping freezes the picture; *single scan*

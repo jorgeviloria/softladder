@@ -8,7 +8,7 @@
 //! Watch, Problems or PLC-tags documents, which are centre documents now.
 
 use egui::{RichText, Sense, Ui};
-use softladder_core::{SectionLanguage, SimulationPanel, VarRef};
+use softladder_core::{LampColour, SectionLanguage, SimulationPanel, VarRef};
 
 use crate::app::EditorApp;
 use crate::design::{
@@ -464,6 +464,7 @@ fn bench_widget(app: &mut EditorApp, ui: &mut Ui) {
                 return;
             };
             widget_header(ui, &tokens, Icon::Bench, "Lamp", &lamp.label, &lamp.var);
+            colour_editor(app, ui, index, lamp.colour);
             let mut label = lamp.label.clone();
             if ui
                 .add(egui::TextEdit::singleline(&mut label).desired_width(f32::INFINITY))
@@ -500,6 +501,7 @@ fn bench_widget(app: &mut EditorApp, ui: &mut Ui) {
                 &analog.var,
             );
             property_mono(ui, &tokens, "Address", &analog.var.to_string());
+            unit_editor(app, ui, Widget::Analog(index), &analog.unit);
             range_editor(app, ui, index, analog.min, analog.max);
         }
         Widget::Gauge(index) => {
@@ -509,6 +511,7 @@ fn bench_widget(app: &mut EditorApp, ui: &mut Ui) {
             };
             widget_header(ui, &tokens, Icon::Bench, "Gauge", &gauge.label, &gauge.var);
             property_mono(ui, &tokens, "Address", &gauge.var.to_string());
+            unit_editor(app, ui, Widget::Gauge(index), &gauge.unit);
             range_editor(app, ui, index, gauge.min, gauge.max);
         }
     }
@@ -538,6 +541,84 @@ fn widget_header(ui: &mut Ui, tokens: &Tokens, icon: Icon, kind: &str, label: &s
     });
     property(ui, tokens, "Label", label);
     property_mono(ui, tokens, "Variable", &var.to_string());
+}
+
+/// The pilot colour. Choosing the current colour again changes nothing.
+fn colour_editor(app: &mut EditorApp, ui: &mut Ui, index: usize, current: LampColour) {
+    let tokens = app.tokens;
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = SPACE_1;
+        ui.label(
+            RichText::new("Colour")
+                .size(TypeScale::CAPTION)
+                .color(tokens.text_dim),
+        );
+        for colour in LampColour::all() {
+            let fill = bench::lamp_fill(&tokens, colour);
+            let selected = colour == current;
+            let text = RichText::new(colour.label())
+                .size(TypeScale::CAPTION)
+                .color(if selected {
+                    egui::Color32::WHITE
+                } else {
+                    tokens.text
+                });
+            if ui
+                .add(
+                    egui::Button::new(text)
+                        .fill(if selected { fill } else { tokens.surface })
+                        .min_size(egui::vec2(52.0, 20.0)),
+                )
+                .clicked()
+                && colour != current
+            {
+                bench::update_panel(app, |panel| {
+                    if let Some(lamp) = panel.lamps.get_mut(index) {
+                        lamp.colour = colour;
+                        return true;
+                    }
+                    false
+                });
+            }
+        }
+    });
+}
+
+/// The engineering unit printed on a slider or a gauge.
+fn unit_editor(app: &mut EditorApp, ui: &mut Ui, widget: Widget, unit: &str) {
+    let tokens = app.tokens;
+    ui.label(
+        RichText::new("Unit")
+            .size(TypeScale::CAPTION)
+            .color(tokens.text_dim),
+    );
+    let mut text = unit.to_owned();
+    if ui
+        .add(
+            egui::TextEdit::singleline(&mut text)
+                .hint_text("rpm, °C, %")
+                .desired_width(f32::INFINITY),
+        )
+        .changed()
+    {
+        bench::update_panel(app, |panel| match widget {
+            Widget::Analog(index) => {
+                if let Some(analog) = panel.analogs.get_mut(index) {
+                    analog.unit.clone_from(&text);
+                    return true;
+                }
+                false
+            }
+            Widget::Gauge(index) => {
+                if let Some(gauge) = panel.gauges.get_mut(index) {
+                    gauge.unit.clone_from(&text);
+                    return true;
+                }
+                false
+            }
+            _ => false,
+        });
+    }
 }
 
 /// The min/max editor shared by the sliders and the gauges.

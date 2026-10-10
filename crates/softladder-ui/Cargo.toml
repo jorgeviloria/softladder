@@ -21,6 +21,7 @@ softladder-edit = { path = "../softladder-edit" }
 softladder-project = { path = "../softladder-project" }
 eframe = { workspace = true }
 egui = { workspace = true }
+egui_plot = { workspace = true }
 rfd = { workspace = true }
 
 [dev-dependencies]

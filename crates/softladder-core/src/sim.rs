@@ -33,6 +33,66 @@ pub struct SimSwitch {
     pub momentary: bool,
 }
 
+/// The colour a pilot lamp glows in while it is lit.
+///
+/// Green is the default, and it is omitted from the file, so a project saved
+/// before lamps had a colour still loads and still draws a green pilot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum LampColour {
+    /// A green pilot. The ordinary "running" lamp.
+    #[default]
+    Green,
+    /// An amber pilot, for a warning or a transitional state.
+    Amber,
+    /// A red pilot, for a fault or a stop.
+    Red,
+    /// A blue pilot, for a mode that is neither run nor fault.
+    Blue,
+}
+
+impl LampColour {
+    /// Every colour the inspector offers, in display order.
+    pub fn all() -> [Self; 4] {
+        [Self::Green, Self::Amber, Self::Red, Self::Blue]
+    }
+
+    /// The word the inspector prints on the colour's button.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Green => "Green",
+            Self::Amber => "Amber",
+            Self::Red => "Red",
+            Self::Blue => "Blue",
+        }
+    }
+
+    /// Guesses a pilot colour from a tag name. A name with no colour word stays
+    /// green, which is what [`Default`] already says.
+    pub fn from_label(label: &str) -> Self {
+        let text = label.to_ascii_lowercase();
+        if text.contains("amber") || text.contains("yellow") || text.contains("orange") {
+            Self::Amber
+        } else if text.contains("red")
+            || text.contains("fault")
+            || text.contains("alarm")
+            || text.contains("estop")
+            || text.contains("e-stop")
+            || text.contains("e_stop")
+        {
+            Self::Red
+        } else if text.contains("blue") {
+            Self::Blue
+        } else {
+            Self::Green
+        }
+    }
+}
+
+/// `true` when `colour` is the default green, so the file omits it.
+fn colour_is_green(colour: &LampColour) -> bool {
+    *colour == LampColour::Green
+}
+
 /// A lamp driven by a physical output.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SimLamp {
@@ -40,6 +100,9 @@ pub struct SimLamp {
     pub var: VarRef,
     /// Text shown on the widget.
     pub label: String,
+    /// Colour of the lit pilot.
+    #[serde(default, skip_serializing_if = "colour_is_green")]
+    pub colour: LampColour,
 }
 
 /// A slider driving an analog (`%IW`) input.
@@ -53,6 +116,9 @@ pub struct SimAnalog {
     pub min: i32,
     /// Highest value the slider can send.
     pub max: i32,
+    /// Engineering unit printed next to the readout. Empty when the value is bare.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit: String,
 }
 
 /// A gauge following an analog (`%QW`) output.
@@ -66,6 +132,9 @@ pub struct SimGauge {
     pub min: i32,
     /// Highest value on the dial.
     pub max: i32,
+    /// Engineering unit printed next to the readout. Empty when the value is bare.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unit: String,
 }
 
 /// The bench laid out next to the ladder; part of the project.
@@ -120,6 +189,7 @@ impl SimulationPanel {
                 continue;
             }
             seen.push(var.clone());
+            let unit = symbol_unit(project, &var);
             let label = symbol_for(project, &var).unwrap_or_else(|| var.to_string());
             match (var.kind, var.accessor) {
                 (VarKind::PhysIn, _) => panel.switches.push(SimSwitch {
@@ -127,18 +197,23 @@ impl SimulationPanel {
                     label,
                     momentary: false,
                 }),
-                (VarKind::PhysOut, _) => panel.lamps.push(SimLamp { var, label }),
+                (VarKind::PhysOut, _) => {
+                    let colour = LampColour::from_label(&label);
+                    panel.lamps.push(SimLamp { var, label, colour });
+                }
                 (VarKind::PhysInWord, _) => panel.analogs.push(SimAnalog {
                     var,
                     label,
                     min: 0,
                     max: 100,
+                    unit,
                 }),
                 (VarKind::PhysOutWord, _) => panel.gauges.push(SimGauge {
                     var,
                     label,
                     min: 0,
                     max: 100,
+                    unit,
                 }),
                 _ => {}
             }
@@ -330,11 +405,22 @@ impl PanelState {
 
 /// Finds the symbol bound to `var`, if the project has one.
 fn symbol_for(project: &Project, var: &VarRef) -> Option<String> {
+    bound_symbol(project, var).map(|symbol| symbol.name.clone())
+}
+
+/// The engineering unit of the symbol bound to `var`, or an empty string.
+fn symbol_unit(project: &Project, var: &VarRef) -> String {
+    bound_symbol(project, var)
+        .and_then(|symbol| symbol.unit.clone())
+        .unwrap_or_default()
+}
+
+/// The symbol whose variable is exactly `var`.
+fn bound_symbol<'a>(project: &'a Project, var: &VarRef) -> Option<&'a crate::model::Symbol> {
     project
         .symbols
         .iter()
         .find(|symbol| symbol.var.as_ref() == Some(var))
-        .map(|symbol| symbol.name.clone())
 }
 
 #[cfg(test)]
@@ -363,18 +449,21 @@ mod tests {
             lamps: vec![SimLamp {
                 var: var("%Q0"),
                 label: "green".to_owned(),
+                colour: LampColour::Green,
             }],
             analogs: vec![SimAnalog {
                 var: var("%IW0"),
                 label: "dial".to_owned(),
                 min: 0,
                 max: 1000,
+                unit: String::new(),
             }],
             gauges: vec![SimGauge {
                 var: var("%QW0"),
                 label: "meter".to_owned(),
                 min: 0,
                 max: 100,
+                unit: String::new(),
             }],
         }
     }
@@ -490,18 +579,21 @@ mod tests {
             lamps: vec![SimLamp {
                 var: var("%MW0.1"),
                 label: "wrong lamp".to_owned(),
+                colour: LampColour::Green,
             }],
             analogs: vec![SimAnalog {
                 var: var("%IW0"),
                 label: "inverted".to_owned(),
                 min: 90,
                 max: 10,
+                unit: String::new(),
             }],
             gauges: vec![SimGauge {
                 var: var("%QW0"),
                 label: "fine".to_owned(),
                 min: 0,
                 max: 10,
+                unit: String::new(),
             }],
         };
         let problems = panel.validate();
@@ -521,6 +613,88 @@ mod tests {
         assert!(text.contains("\"simulation\""));
         // Positions are runtime state and never reach the file.
         assert!(!text.contains("closed"));
+        // The default colour and an empty unit stay out of the file.
+        assert!(!text.contains("colour"));
+        assert!(!text.contains("unit"));
+    }
+
+    #[test]
+    fn a_lamp_without_a_colour_and_a_slider_without_a_unit_still_load() {
+        let text = r#"{
+            "var": {"kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null},
+            "label": "green_lamp"
+        }"#;
+        let lamp: SimLamp = serde_json::from_str(text).expect("an old lamp loads");
+        assert_eq!(lamp.colour, LampColour::Green);
+
+        let text = r#"{
+            "var": {"kind": "PhysInWord", "index": 0, "index_expr": null, "accessor": null},
+            "label": "speed", "min": 0, "max": 100
+        }"#;
+        let analog: SimAnalog = serde_json::from_str(text).expect("an old slider loads");
+        assert!(analog.unit.is_empty());
+    }
+
+    #[test]
+    fn auto_fill_picks_the_pilot_colour_and_the_symbol_unit() {
+        let mut project = Project::new("colours");
+        let mut rung = Rung::new(1);
+        rung.elements.push(PlacedElement::with_var(
+            ElementKind::CoilOut,
+            var("%Q0"),
+            0,
+            0,
+        ));
+        rung.elements.push(PlacedElement::with_var(
+            ElementKind::CoilOut,
+            var("%Q1"),
+            1,
+            0,
+        ));
+        rung.elements.push(PlacedElement::with_var(
+            ElementKind::Compare,
+            var("%IW0"),
+            2,
+            0,
+        ));
+        project.rungs.push(rung);
+        let mut section = Section::new(1, "Main");
+        section.rungs.push(1);
+        project.sections.push(section);
+        project.symbols.push(Symbol {
+            name: "amber_lamp".to_owned(),
+            var: Some(var("%Q0")),
+            comment: String::new(),
+            unit: None,
+        });
+        project.symbols.push(Symbol {
+            name: "fault_lamp".to_owned(),
+            var: Some(var("%Q1")),
+            comment: String::new(),
+            unit: None,
+        });
+        project.symbols.push(Symbol {
+            name: "line_speed".to_owned(),
+            var: Some(var("%IW0")),
+            comment: String::new(),
+            unit: Some("m/min".to_owned()),
+        });
+
+        let panel = SimulationPanel::auto_fill(&project);
+        assert_eq!(panel.lamps[0].colour, LampColour::Amber);
+        assert_eq!(panel.lamps[1].colour, LampColour::Red);
+        assert_eq!(panel.analogs[0].unit, "m/min");
+    }
+
+    #[test]
+    fn a_tag_name_suggests_the_pilot_colour() {
+        assert_eq!(LampColour::from_label("green_lamp"), LampColour::Green);
+        assert_eq!(LampColour::from_label("amber_lamp"), LampColour::Amber);
+        assert_eq!(LampColour::from_label("fault_lamp"), LampColour::Red);
+        assert_eq!(LampColour::from_label("blue_mode"), LampColour::Blue);
+        assert_eq!(LampColour::from_label("%Q3"), LampColour::Green);
+        assert_eq!(LampColour::default().label(), "Green");
+        assert_eq!(LampColour::all().len(), 4);
     }
 
     #[test]

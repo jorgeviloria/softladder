@@ -38,6 +38,7 @@ fn project() -> Project {
         lamps: vec![SimLamp {
             var: var("%Q0"),
             label: "green".to_owned(),
+            colour: softladder_core::LampColour::Green,
         }],
         ..SimulationPanel::default()
     };

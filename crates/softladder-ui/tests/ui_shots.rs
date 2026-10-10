@@ -593,14 +593,38 @@ fn shoot_the_editor() {
     }
     shoot(&mut app, size, &dir.join("03-running.png"));
 
-    // 3b. The bench document, running: the operator screen.
+    // 3b. The bench document, running: the operator screen. One switch is a
+    // raised push-button, the conveyor zone carries a slider and a gauge with
+    // units, and the trend has a step where the start switch closes.
     let mut app = EditorApp::new(rich_project());
     app.handle(softladder_ui::shortcuts::Action::AutoFillBench);
+    softladder_ui::panels::bench::update_panel(&mut app, |panel| {
+        if let Some(stop) = panel
+            .switches
+            .iter_mut()
+            .find(|switch| switch.label == "stop_button")
+        {
+            stop.momentary = true;
+        }
+        panel.analogs.push(softladder_core::SimAnalog {
+            var: "%IW0".parse().expect("a valid variable"),
+            label: "conveyor_speed".to_owned(),
+            min: 0,
+            max: 100,
+            unit: "rpm".to_owned(),
+        });
+        panel.gauges.push(softladder_core::SimGauge {
+            var: "%QW0".parse().expect("a valid variable"),
+            label: "conveyor_load".to_owned(),
+            min: 0,
+            max: 100,
+            unit: "%".to_owned(),
+        });
+        true
+    });
     app.show_document(CentreTab::Bench);
     app.handle(softladder_ui::shortcuts::Action::RunStop);
-    for _ in 0..40 {
-        app.single_scan();
-    }
+    softladder_ui::panels::bench::rehearse(&mut app, 40, Some(8));
     shoot(&mut app, size, &dir.join("03b-bench.png"));
 
     // 4. While placing an element from the palette.

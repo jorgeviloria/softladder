@@ -190,10 +190,21 @@ bench runs; values update in place.
 
 ## 8. Bench (the HMI view)
 
-Laid out like an operator screen, not a form: switches are proper toggles with visible on/off state,
-push-buttons look like buttons and spring back, lamps are round indicators with a glow when lit,
-sliders and gauges are real widgets with numeric readouts. Automatically filled from the program's
-physical variables, labels from the tags. Drag-free editing via the inspector.
+Laid out like an operator screen, not a form. Every widget is a card of the same size, in a grid
+that wraps. A tag prefix shared by two or more widgets (`conveyor_run`, `conveyor_speed`) is a
+zone titled from that prefix; a name that shares no prefix stays with its role: Inputs, Outputs
+or Analog.
+
+Switches are toggles with a visible on/off state. Momentary push-buttons are raised and sink,
+with a lit pip, while they are held; they spring back after the scan. Lamps are round pilots:
+dark in the bezel when off, and a halo in the lamp's colour when on. The colour is Green, Amber,
+Red or Blue, chosen in the inspector, and auto-fill guesses it from the tag name (`amber_lamp`,
+`fault_lamp`). Sliders and gauges are real widgets; the readout and the scale print the
+engineering unit when the widget has one. Auto-fill copies the unit from the tag.
+
+Under the grid, the trend records every scan. Outputs are pinned until the operator toggles the
+chips. The plot's horizontal axis is seconds of simulated time. A new run clears the history.
+Editing a widget stays in the inspector: label, momentary, colour, unit and range.
 
 ## 9. Feedback, empty states and errors
 

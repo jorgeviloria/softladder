@@ -215,6 +215,7 @@ mod tests {
             lamps: vec![SimLamp {
                 var: var("%Q0"),
                 label: "green".to_owned(),
+                colour: softladder_core::LampColour::Green,
             }],
             ..SimulationPanel::default()
         };
@@ -282,6 +283,7 @@ mod tests {
             label: "dial".to_owned(),
             min: 0,
             max: 1000,
+            unit: String::new(),
         }];
         let mut bench = Bench::new(project);
         bench.start();
@@ -317,6 +319,7 @@ mod tests {
             label: "meter".to_owned(),
             min: 0,
             max: 100,
+            unit: String::new(),
         }];
         let mut bench = Bench::new(project);
         bench.start();
@@ -371,6 +374,7 @@ mod tests {
             lamps: vec![SimLamp {
                 var: var("%Q0"),
                 label: "done".to_owned(),
+                colour: softladder_core::LampColour::Green,
             }],
             ..SimulationPanel::default()
         };
@@ -506,6 +510,7 @@ mod tests {
             lamps: vec![SimLamp {
                 var: var("%Q0"),
                 label: "green".to_owned(),
+                colour: softladder_core::LampColour::Green,
             }],
             ..SimulationPanel::default()
         });

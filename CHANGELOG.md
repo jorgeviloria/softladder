@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — operator bench (UI/UX U5)
+
+### Added
+
+- **The bench is an operator screen.** Cards share one size. A tag prefix that two widgets share
+  becomes a zone; the rest stay in Inputs, Outputs or Analog.
+- **Pilot colour and engineering units.** A lamp is green, amber, red or blue, with a halo when it
+  is lit. A slider or a gauge prints its unit. Auto-fill guesses the colour from the tag name and
+  copies the unit from the symbol. Both fields are optional in the project file.
+- **A trend under the cards.** It records each scan. Outputs start pinned; a chip shows or hides a
+  variable. Starting a run clears the history.
+
+### Changed
+
+- A momentary push-button is drawn raised and sinks while it is held. Whether it is momentary is
+  edited in the inspector, not on the card.
+
 ## [Unreleased] — data tables (UI/UX U4)
 
 ### Added

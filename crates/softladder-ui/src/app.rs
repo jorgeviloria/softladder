@@ -196,6 +196,8 @@ pub struct EditorApp {
     pub(crate) tag_draft: (String, String, String),
     pub(crate) editor: Editor,
     pub(crate) bench: Bench,
+    /// Samples the bench scope records while the simulator scans.
+    pub(crate) trend: crate::panels::bench::Trend,
     pub(crate) selected_section: usize,
     pub(crate) selected_rung: Option<u32>,
     pub(crate) selection: Option<(u8, u8)>,
@@ -248,6 +250,7 @@ impl EditorApp {
             tag_draft: (String::new(), String::new(), String::new()),
             editor,
             bench,
+            trend: crate::panels::bench::Trend::default(),
             selected_section: 0,
             selected_rung: None,
             selection: None,
@@ -453,6 +456,7 @@ impl EditorApp {
     pub(crate) fn bench_step(&mut self) {
         if self.bench.step().is_some() {
             self.last_scan_ms = self.bench.runtime().stats().last_ms;
+            self.trend.sample(&self.bench);
         }
     }
 
@@ -792,6 +796,7 @@ impl EditorApp {
             self.note("stopped");
         } else {
             self.bench.start();
+            self.trend.clear();
             self.last_step = None;
             self.note("running");
         }

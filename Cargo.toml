@@ -31,6 +31,8 @@ flate2 = "1.0"
 # (1.81) is compatible with the workspace `rust-version` of 1.82.
 eframe = "0.31"
 egui = "0.31"
+# Same 0.31 series as egui. The bench trend is the only plot in the editor.
+egui_plot = "0.31"
 # Native file dialogs. The default `xdg-portal` backend on Linux is pure Rust,
 # so it needs no GTK headers at build time.
 rfd = "0.15"
