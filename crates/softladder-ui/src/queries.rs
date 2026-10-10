@@ -136,27 +136,39 @@ pub fn problem_counts(problems: &[Diagnostic]) -> (usize, usize) {
     (errors, problems.len().saturating_sub(errors))
 }
 
-/// Short text for a runtime lifecycle state, used by the status bar.
+/// The one word for a runtime state.
+///
+/// A single scan is `SIM SCAN`, never a scan sitting next to "offline": the
+/// status bar has one mode, and it has to be the one the machine is in.
 pub fn run_state_text(state: RuntimeState) -> &'static str {
     match state {
         RuntimeState::Loading => "LOAD",
-        RuntimeState::Stop => "STOP",
-        RuntimeState::Run => "RUN",
-        RuntimeState::RunOneCycle => "SCAN",
+        RuntimeState::Stop => "SIM STOP",
+        RuntimeState::Run => "SIM RUN",
+        RuntimeState::RunOneCycle => "SIM SCAN",
         RuntimeState::Freeze => "FREEZE",
     }
 }
 
+/// The name shown for a project: its own name, else the file, else `untitled`.
+pub fn project_label(name: &str, path: Option<&Path>) -> String {
+    let trimmed = name.trim();
+    if !trimmed.is_empty() {
+        return trimmed.to_owned();
+    }
+    path.and_then(Path::file_name)
+        .and_then(|file| file.to_str())
+        .unwrap_or("untitled")
+        .to_owned()
+}
+
 /// Title of the native window.
 pub fn window_title(name: &str, dirty: bool, path: Option<&Path>) -> String {
-    let name = if name.trim().is_empty() {
-        path.and_then(Path::file_name)
-            .and_then(|file| file.to_str())
-            .unwrap_or("untitled")
-    } else {
-        name
-    };
-    format!("{name}{} — SoftLadder", if dirty { " *" } else { "" })
+    format!(
+        "{}{} — SoftLadder",
+        project_label(name, path),
+        if dirty { " *" } else { "" }
+    )
 }
 
 /// The whole status bar, as one line.
@@ -801,9 +813,9 @@ mod tests {
     #[test]
     fn run_state_text_names_every_lifecycle_state() {
         assert_eq!(run_state_text(RuntimeState::Loading), "LOAD");
-        assert_eq!(run_state_text(RuntimeState::Stop), "STOP");
-        assert_eq!(run_state_text(RuntimeState::Run), "RUN");
-        assert_eq!(run_state_text(RuntimeState::RunOneCycle), "SCAN");
+        assert_eq!(run_state_text(RuntimeState::Stop), "SIM STOP");
+        assert_eq!(run_state_text(RuntimeState::Run), "SIM RUN");
+        assert_eq!(run_state_text(RuntimeState::RunOneCycle), "SIM SCAN");
         assert_eq!(run_state_text(RuntimeState::Freeze), "FREEZE");
     }
 
@@ -828,15 +840,15 @@ mod tests {
         let path = Path::new("/tmp/plant.slprj");
         assert_eq!(
             status_text(RuntimeState::Run, 412, 0.031, Some(path), false, 0, 0),
-            "RUN   cycles 412   scan 0.03 ms   /tmp/plant.slprj   no problems"
+            "SIM RUN   cycles 412   scan 0.03 ms   /tmp/plant.slprj   no problems"
         );
         assert_eq!(
             status_text(RuntimeState::Stop, 0, 0.0, Some(path), true, 2, 1),
-            "STOP   cycles 0   scan 0.00 ms   /tmp/plant.slprj *   2 errors, 1 warning"
+            "SIM STOP   cycles 0   scan 0.00 ms   /tmp/plant.slprj *   2 errors, 1 warning"
         );
         assert_eq!(
             status_text(RuntimeState::RunOneCycle, 7, f64::NAN, None, false, 0, 1),
-            "SCAN   cycles 7   scan 0.00 ms   untitled   1 warning"
+            "SIM SCAN   cycles 7   scan 0.00 ms   untitled   1 warning"
         );
         assert_eq!(
             status_text(RuntimeState::Freeze, 1, 1.5, None, true, 1, 0),

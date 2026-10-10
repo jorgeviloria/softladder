@@ -14,7 +14,7 @@
 //! drawing only reads it. Clicking dispatches [`Action::Pick`] through
 //! [`EditorApp::handle`], which is what arms the tool and updates the ribbon.
 
-use egui::{Color32, CornerRadius, FontFamily, FontId, Response, RichText, Sense, Stroke, Ui};
+use egui::{Color32, CornerRadius, FontId, Response, Sense, Stroke, Ui};
 
 use softladder_core::ElementKind;
 
@@ -143,14 +143,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     let mut pick: Option<ElementKind> = None;
     let mut pointer = false;
 
-    // A horizontally scrollable band, so no family is ever unreachable on a
-    // narrow window; the wheel scrolls it, the way the ribbon scrolls in TIA.
-    egui::ScrollArea::horizontal()
-        .id_salt("palette-band")
-        .auto_shrink([false, true])
-        .show(ui, |ui| {
-            ribbon(ui, &tokens, selected_tool, &mut pick, &mut pointer)
-        });
+    ribbon(ui, &tokens, selected_tool, &mut pick, &mut pointer);
 
     if pointer {
         app.handle(Action::Cancel);
@@ -159,7 +152,12 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     }
 }
 
-/// Lays out the tool group and every instruction family in one band.
+/// Lays out the tool group and every instruction family as one compact band.
+///
+/// The band is a toolbar, not a catalogue: one row of icon buttons the size of
+/// the command bar's, each family a framed group, the names and shortcut
+/// letters in the tooltips. It wraps rather than clips, so on a narrow window a
+/// family moves to a second row instead of disappearing.
 fn ribbon(
     ui: &mut Ui,
     tokens: &Tokens,
@@ -167,18 +165,17 @@ fn ribbon(
     pick: &mut Option<ElementKind>,
     pointer: &mut bool,
 ) {
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(SPACE_2, SPACE_1);
-        group(ui, tokens, "Tool", |ui| {
+        ui.add_space(SPACE_1);
+        group(ui, tokens, &[CHIP_W], |ui| {
             let response = chip(
                 ui,
                 tokens,
-                &PointerGlyph,
-                "Select",
+                Face::Glyph(&PointerGlyph),
                 selected_tool == Tool::Select,
-                0.0,
             )
-            .on_hover_text("Pointer tool: click to select, drag to move");
+            .on_hover_text("Select  (Esc)\nPointer tool: click to select, drag to move");
             if response.clicked() {
                 *pointer = true;
             }
@@ -188,21 +185,18 @@ fn ribbon(
             if entries.is_empty() {
                 continue;
             }
-            // One width per family, so a group reads as a column of equal
-            // buttons and no caption is ever clipped.
-            let width = entries
-                .iter()
-                .map(|entry| caption_width(ui, caption_of(entry)))
-                .fold(0.0_f32, f32::max)
-                .max(CHIP_W);
-            group(ui, tokens, family.label(), |ui| {
-                for entry in entries {
+            let faces: Vec<Face<'_>> = entries.iter().map(|entry| face_of(entry)).collect();
+            let widths: Vec<f32> = faces.iter().map(|face| face.width(ui)).collect();
+            group(ui, tokens, &widths, |ui| {
+                for (entry, face) in entries.iter().zip(faces) {
                     let armed = selected_tool == Tool::Place(entry.kind);
-                    let response = chip(ui, tokens, &entry.kind, caption_of(entry), armed, width)
-                        .on_hover_text(format!(
-                            "{}  ({})\n{}",
-                            entry.tooltip, entry.letter, entry.label
-                        ));
+                    let response = chip(ui, tokens, face, armed).on_hover_text(format!(
+                        "{} · {}  ({})\n{}",
+                        family.label(),
+                        caption_of(entry),
+                        entry.letter,
+                        entry.tooltip
+                    ));
                     if response.clicked() {
                         *pick = Some(entry.kind);
                     }
@@ -212,35 +206,36 @@ fn ribbon(
     });
 }
 
-/// A group box with its caption above it, the way the ribbon label sits above
-/// every other command group.
-fn group(ui: &mut Ui, tokens: &Tokens, title: &str, contents: impl FnOnce(&mut Ui)) {
-    ui.vertical(|ui| {
-        ui.add_space(SPACE_1);
-        ui.horizontal(|ui| {
-            ui.add_space(SPACE_1);
-            ui.label(
-                RichText::new(title.to_uppercase())
-                    .size(TypeScale::CAPTION)
-                    .color(tokens.text_dim)
-                    .strong(),
-            );
-        });
-        egui::Frame::new()
-            .fill(tokens.panel)
-            .stroke(Stroke::new(1.0_f32, tokens.border))
-            .corner_radius(CornerRadius::same(RADIUS_CONTROL))
-            .inner_margin(egui::Margin::same(SPACE_1 as i8))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(SPACE_1, SPACE_1);
-                    contents(ui);
+/// A framed group of chips.
+///
+/// `chips` are the widths of the chips inside: the group's size is computed
+/// from them *before* it is placed, because a wrapping layout can only move a
+/// child to the next line when it knows how big the child is.
+fn group(ui: &mut Ui, tokens: &Tokens, chips: &[f32], contents: impl FnOnce(&mut Ui)) {
+    let gaps = GAP * chips.len().saturating_sub(1) as f32;
+    // The frame adds a 2 pt margin and a 1 pt stroke on each side.
+    let frame = 2.0 * (2.0 + 1.0);
+    let size = egui::vec2(chips.iter().sum::<f32>() + gaps + frame, CHIP_H + frame);
+    ui.allocate_ui_with_layout(
+        size,
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            egui::Frame::new()
+                .fill(tokens.panel)
+                .stroke(Stroke::new(1.0_f32, tokens.border))
+                .corner_radius(CornerRadius::same(RADIUS_CONTROL))
+                .inner_margin(egui::Margin::same(2))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(GAP, 0.0);
+                        contents(ui);
+                    });
                 });
-            });
-    });
+        },
+    );
 }
 
-/// Anything that can be drawn as a palette chip: an element kind, or the pointer.
+/// Anything that can be drawn as a palette glyph: an element kind, or the pointer.
 trait Chip {
     /// Paints the chip's glyph into `rect`.
     fn paint(&self, painter: &egui::Painter, rect: egui::Rect, tokens: &Tokens);
@@ -261,51 +256,76 @@ impl Chip for PointerGlyph {
     }
 }
 
-/// Height of one palette chip: a glyph and a caption line under it.
-const CHIP_H: f32 = 40.0;
-/// Smallest width of a palette chip, so a two-letter caption still has a target.
-const CHIP_W: f32 = 34.0;
-/// Height reserved for the glyph inside a chip.
-const GLYPH_H: f32 = 17.0;
-
-/// The width a caption needs, including the chip's padding.
-fn caption_width(ui: &Ui, caption: &str) -> f32 {
-    let font = FontId::new(TypeScale::CAPTION, FontFamily::Proportional);
-    ui.painter()
-        .layout_no_wrap(caption.to_owned(), font, Color32::PLACEHOLDER)
-        .size()
-        .x
-        + SPACE_2
+/// What a chip shows on its face.
+enum Face<'a> {
+    /// A schematic glyph: contacts, coils, program control, the pointer.
+    Glyph(&'a dyn Chip),
+    /// A mnemonic: a function block's glyph is a box too small to read, so the
+    /// chip prints the name a programmer reads anyway (`TON`, `CTU`, `FIFO`).
+    Mnemonic(&'static str),
 }
 
-/// Draws one chip: a glyph above its caption, with a clear armed state.
-///
-/// An icon *above* its label is what keeps the whole instruction set inside the
-/// ribbon: a chip is only as wide as its caption, so all six families fit in the
-/// band. The tooltip carries the full description and the shortcut letter.
-fn chip(
-    ui: &mut Ui,
-    tokens: &Tokens,
-    glyph: &dyn Chip,
-    caption: &str,
-    armed: bool,
-    width: f32,
-) -> Response {
-    let font = FontId::new(TypeScale::CAPTION, FontFamily::Proportional);
-    let width = if width > 0.0 { width } else { CHIP_W };
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, CHIP_H), Sense::click());
+impl Face<'_> {
+    /// The chip width this face needs.
+    fn width(&self, ui: &Ui) -> f32 {
+        match self {
+            Face::Glyph(_) => CHIP_W,
+            Face::Mnemonic(text) => {
+                let galley = ui.painter().layout_no_wrap(
+                    (*text).to_owned(),
+                    mnemonic_font(ui),
+                    Color32::PLACEHOLDER,
+                );
+                (galley.size().x + SPACE_2 + 2.0).max(CHIP_W)
+            }
+        }
+    }
+}
 
-    let border = if armed || response.hovered() {
-        Stroke::new(1.0_f32, tokens.accent)
-    } else {
-        Stroke::new(1.0_f32, tokens.border)
-    };
+/// The face of a palette entry.
+fn face_of(entry: &'static Entry) -> Face<'static> {
+    match entry.kind {
+        ElementKind::Timer { .. }
+        | ElementKind::Counter { .. }
+        | ElementKind::Register { .. }
+        | ElementKind::Compare
+        | ElementKind::Operate => Face::Mnemonic(caption_of(entry)),
+        _ => Face::Glyph(&entry.kind),
+    }
+}
+
+/// The font a mnemonic is printed in.
+fn mnemonic_font(ui: &Ui) -> FontId {
+    FontId::new(
+        TypeScale::CAPTION,
+        crate::design::mono_semibold_family(ui.ctx()),
+    )
+}
+
+/// Height of one palette chip; the same as a command-bar button.
+const CHIP_H: f32 = 28.0;
+/// Width of a glyph chip.
+const CHIP_W: f32 = 32.0;
+/// Gap between the chips of a group.
+const GAP: f32 = 2.0;
+
+/// Draws one chip with a clear armed state: the tool in hand is filled with the
+/// accent and underlined, so it reads without a caption.
+fn chip(ui: &mut Ui, tokens: &Tokens, face: Face<'_>, armed: bool) -> Response {
+    let width = face.width(ui);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, CHIP_H), Sense::click());
+    let hovered = response.hovered();
     let fill = if armed {
         tokens.accent_soft
-    } else if response.hovered() {
+    } else if hovered {
         tokens.surface
     } else {
         Color32::TRANSPARENT
+    };
+    let border = if armed {
+        Stroke::new(1.0_f32, tokens.accent)
+    } else {
+        Stroke::NONE
     };
     ui.painter().rect(
         rect,
@@ -314,51 +334,27 @@ fn chip(
         border,
         egui::StrokeKind::Inside,
     );
-    // A plate behind the glyph, so the icon reads as a button face rather than
-    // as a drawing floating in the panel.
-    let plate = egui::Rect::from_center_size(
-        egui::pos2(rect.center().x, rect.top() + SPACE_1 + GLYPH_H / 2.0),
-        egui::vec2(rect.width() - SPACE_1, GLYPH_H + SPACE_1),
-    );
-    ui.painter().rect(
-        plate,
-        CornerRadius::same(2),
-        tokens.surface,
-        Stroke::NONE,
-        egui::StrokeKind::Inside,
-    );
-
-    // An armed chip draws its glyph and caption in the accent colour, so which
-    // tool is in hand is unmistakable without reading the caption.
     let ink = if armed { tokens.accent } else { tokens.text };
-    let glyph_tokens = Tokens {
-        wire_idle: ink,
-        text: ink,
-        ..*tokens
-    };
-    let glyph_rect = egui::Rect::from_center_size(
-        egui::pos2(rect.center().x, rect.top() + SPACE_1 + GLYPH_H / 2.0),
-        egui::vec2((rect.width() - SPACE_2).min(30.0), GLYPH_H),
-    );
-    glyph.paint(ui.painter(), glyph_rect, &glyph_tokens);
-    // The caption is laid out to fit the chip, so it is never cut in half.
-    let galley = ui
-        .painter()
-        .layout(caption.to_owned(), font, ink, rect.width() - SPACE_1);
-    ui.painter().galley(
-        egui::pos2(
-            rect.center().x - galley.size().x / 2.0,
-            glyph_rect.bottom() + SPACE_1,
-        ),
-        galley,
-        ink,
-    );
-    if armed {
-        ui.painter().hline(
-            (rect.left() + SPACE_1)..=(rect.right() - SPACE_1),
-            rect.bottom() - 1.0,
-            Stroke::new(2.0_f32, tokens.accent),
-        );
+    match face {
+        Face::Glyph(glyph) => {
+            let glyph_tokens = Tokens {
+                wire_idle: ink,
+                text: ink,
+                ..*tokens
+            };
+            let glyph_rect =
+                egui::Rect::from_center_size(rect.center(), egui::vec2(CHIP_W - SPACE_2, 16.0));
+            glyph.paint(ui.painter(), glyph_rect, &glyph_tokens);
+        }
+        Face::Mnemonic(text) => {
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                text,
+                mnemonic_font(ui),
+                ink,
+            );
+        }
     }
     response
 }

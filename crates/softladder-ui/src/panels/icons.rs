@@ -44,6 +44,38 @@ pub enum Icon {
     ChevronRight,
     /// A chevron pointing down, for an expanded node.
     ChevronDown,
+    /// Undo the last edit: a hook arrow pointing left.
+    Undo,
+    /// Redo: the mirror image of [`Icon::Undo`].
+    Redo,
+    /// A new, empty document.
+    New,
+    /// Open a file: a folder.
+    Open,
+    /// Save: a floppy disk.
+    Save,
+    /// Save under a new name: the disk with a plus.
+    SaveAs,
+    /// Run the program.
+    Play,
+    /// Stop the program.
+    Stop,
+    /// Advance by a single scan.
+    Step,
+    /// Zoom in: a magnifier with a plus.
+    ZoomIn,
+    /// Zoom out: a magnifier with a minus.
+    ZoomOut,
+    /// Fit the document in the view: four corner brackets.
+    ZoomFit,
+    /// Show addresses: the `%` of the IEC notation.
+    Address,
+    /// The dark theme: a crescent moon.
+    Moon,
+    /// The light theme: a sun.
+    Sun,
+    /// The command palette: a magnifier over a list.
+    Search,
 }
 
 /// The number of points a tree row icon is drawn in.
@@ -54,11 +86,16 @@ pub const SMALL: f32 = 14.0;
 /// A degenerate `rect` (zero or negative width or height) is drawn as nothing
 /// rather than as a panicking shape.
 pub fn draw(painter: &Painter, rect: Rect, tokens: &Tokens, icon: Icon) {
+    draw_ink(painter, rect, colour(tokens, icon), icon);
+}
+
+/// Draws `icon` centred in `rect` in an explicit colour, for a command button
+/// whose ink follows its state (enabled, disabled, on a filled background).
+pub fn draw_ink(painter: &Painter, rect: Rect, ink: Color32, icon: Icon) {
     if rect.width() <= 0.0 || rect.height() <= 0.0 {
         return;
     }
-    let stroke = Stroke::new(1.4_f32, colour(tokens, icon));
-    let ink = colour(tokens, icon);
+    let stroke = Stroke::new(1.4_f32, ink);
     // A local coordinate helper: `(0, 0)` is the top-left of the icon, `(1, 1)`
     // the bottom-right.
     let at = |x: f32, y: f32| {
@@ -225,6 +262,182 @@ pub fn draw(painter: &Painter, rect: Rect, tokens: &Tokens, icon: Icon) {
             painter.line_segment([at(0.18, 0.38), at(0.50, 0.68)], stroke);
             painter.line_segment([at(0.50, 0.68), at(0.82, 0.38)], stroke);
         }
+        Icon::Undo | Icon::Redo => {
+            // Drawn as Undo; Redo mirrors every x.
+            let mirror = icon == Icon::Redo;
+            let at = |x: f32, y: f32| at(if mirror { 1.0 - x } else { x }, y);
+            let centre = (0.58_f32, 0.58_f32);
+            let radius = 0.20_f32;
+            let mut points = vec![at(0.22, 0.38)];
+            for step in 0..=12 {
+                let angle =
+                    -std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * (step as f32 / 12.0);
+                points.push(at(
+                    centre.0 + radius * angle.cos(),
+                    centre.1 + radius * angle.sin(),
+                ));
+            }
+            points.push(at(0.36, 0.78));
+            painter.add(Shape::line(points, stroke));
+            painter.add(Shape::line(
+                vec![at(0.36, 0.24), at(0.20, 0.38), at(0.36, 0.52)],
+                stroke,
+            ));
+        }
+        Icon::New => {
+            painter.add(Shape::closed_line(
+                vec![
+                    at(0.22, 0.10),
+                    at(0.60, 0.10),
+                    at(0.80, 0.30),
+                    at(0.80, 0.90),
+                    at(0.22, 0.90),
+                ],
+                stroke,
+            ));
+            painter.add(Shape::line(
+                vec![at(0.60, 0.10), at(0.60, 0.30), at(0.80, 0.30)],
+                Stroke::new(1.0_f32, ink),
+            ));
+        }
+        Icon::Open => {
+            painter.add(Shape::closed_line(
+                vec![
+                    at(0.08, 0.22),
+                    at(0.38, 0.22),
+                    at(0.46, 0.32),
+                    at(0.92, 0.32),
+                    at(0.92, 0.84),
+                    at(0.08, 0.84),
+                ],
+                stroke,
+            ));
+            painter.hline(
+                at(0.08, 0.0).x..=at(0.92, 0.0).x,
+                at(0.0, 0.44).y,
+                Stroke::new(1.0_f32, ink),
+            );
+        }
+        Icon::Save | Icon::SaveAs => {
+            let body = Rect::from_min_max(at(0.14, 0.12), at(0.86, 0.88));
+            painter.rect(
+                body,
+                CornerRadius::same(1),
+                Color32::TRANSPARENT,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            painter.rect_filled(
+                Rect::from_min_max(at(0.30, 0.12), at(0.64, 0.34)),
+                CornerRadius::ZERO,
+                ink,
+            );
+            painter.rect(
+                Rect::from_min_max(at(0.28, 0.56), at(0.72, 0.88)),
+                CornerRadius::ZERO,
+                Color32::TRANSPARENT,
+                Stroke::new(1.0_f32, ink),
+                egui::StrokeKind::Middle,
+            );
+            if icon == Icon::SaveAs {
+                // The plus sits on the label of the disk.
+                let plus = Stroke::new(1.4_f32, ink);
+                painter.line_segment([at(0.50, 0.62), at(0.50, 0.82)], plus);
+                painter.line_segment([at(0.40, 0.72), at(0.60, 0.72)], plus);
+            }
+        }
+        Icon::Play => {
+            painter.add(Shape::convex_polygon(
+                vec![at(0.26, 0.14), at(0.86, 0.50), at(0.26, 0.86)],
+                ink,
+                Stroke::NONE,
+            ));
+        }
+        Icon::Stop => {
+            painter.rect_filled(
+                Rect::from_min_max(at(0.22, 0.22), at(0.78, 0.78)),
+                CornerRadius::same(1),
+                ink,
+            );
+        }
+        Icon::Step => {
+            painter.add(Shape::convex_polygon(
+                vec![at(0.18, 0.18), at(0.64, 0.50), at(0.18, 0.82)],
+                ink,
+                Stroke::NONE,
+            ));
+            painter.rect_filled(
+                Rect::from_min_max(at(0.70, 0.18), at(0.82, 0.82)),
+                CornerRadius::ZERO,
+                ink,
+            );
+        }
+        Icon::ZoomIn | Icon::ZoomOut | Icon::Search => {
+            let centre = at(0.42, 0.42);
+            let radius = rect.width().min(rect.height()) * 0.28;
+            painter.circle_stroke(centre, radius.max(1.5), stroke);
+            painter.line_segment([at(0.62, 0.62), at(0.88, 0.88)], Stroke::new(2.0_f32, ink));
+            let mark = Stroke::new(1.3_f32, ink);
+            if icon != Icon::Search {
+                painter.line_segment([at(0.30, 0.42), at(0.54, 0.42)], mark);
+            }
+            if icon == Icon::ZoomIn {
+                painter.line_segment([at(0.42, 0.30), at(0.42, 0.54)], mark);
+            }
+        }
+        Icon::ZoomFit => {
+            for (corner, dx, dy) in [
+                ((0.14_f32, 0.14_f32), 1.0_f32, 1.0_f32),
+                ((0.86, 0.14), -1.0, 1.0),
+                ((0.86, 0.86), -1.0, -1.0),
+                ((0.14, 0.86), 1.0, -1.0),
+            ] {
+                painter.add(Shape::line(
+                    vec![
+                        at(corner.0, corner.1 + 0.24 * dy),
+                        at(corner.0, corner.1),
+                        at(corner.0 + 0.24 * dx, corner.1),
+                    ],
+                    stroke,
+                ));
+            }
+        }
+        Icon::Address => {
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                "%",
+                FontId::new((rect.height() * 0.9).max(6.0), FontFamily::Monospace),
+                ink,
+            );
+        }
+        Icon::Moon => {
+            // A crescent: the outer arc forward, the inner arc back.
+            let mut points = Vec::with_capacity(34);
+            for step in 0..=16 {
+                let angle = 0.9 + (std::f32::consts::TAU - 1.8) * (step as f32 / 16.0);
+                points.push(at(0.5 + 0.36 * angle.cos(), 0.5 + 0.36 * angle.sin()));
+            }
+            for step in (0..=16).rev() {
+                let angle = 1.5 + (std::f32::consts::TAU - 3.0) * (step as f32 / 16.0);
+                points.push(at(0.66 + 0.26 * angle.cos(), 0.40 + 0.26 * angle.sin()));
+            }
+            painter.add(Shape::closed_line(points, stroke));
+        }
+        Icon::Sun => {
+            painter.circle_stroke(at(0.5, 0.5), (rect.width() * 0.17).max(1.5), stroke);
+            for ray in 0..8 {
+                let angle = std::f32::consts::FRAC_PI_4 * ray as f32;
+                let (sin, cos) = angle.sin_cos();
+                painter.line_segment(
+                    [
+                        at(0.5 + 0.30 * cos, 0.5 + 0.30 * sin),
+                        at(0.5 + 0.42 * cos, 0.5 + 0.42 * sin),
+                    ],
+                    Stroke::new(1.2_f32, ink),
+                );
+            }
+        }
     }
 }
 
@@ -314,6 +527,22 @@ mod tests {
             Icon::Pointer,
             Icon::ChevronRight,
             Icon::ChevronDown,
+            Icon::Undo,
+            Icon::Redo,
+            Icon::New,
+            Icon::Open,
+            Icon::Save,
+            Icon::SaveAs,
+            Icon::Play,
+            Icon::Stop,
+            Icon::Step,
+            Icon::ZoomIn,
+            Icon::ZoomOut,
+            Icon::ZoomFit,
+            Icon::Address,
+            Icon::Moon,
+            Icon::Sun,
+            Icon::Search,
         ] {
             for side in [1.0_f32, SMALL, 20.0, 32.0] {
                 paint(

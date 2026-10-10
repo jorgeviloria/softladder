@@ -8,129 +8,253 @@ use egui::{Align, Layout, RichText, Ui};
 
 use crate::app::{CentreTab, EditorApp};
 use crate::design::{quiet_pill, rule, TypeScale, SPACE_1, SPACE_2, SPACE_3};
+use crate::panels::icons::{self, Icon};
 use crate::shortcuts::Action;
 
 use crate::{canvas, panels};
 
-/// The menu bar and the command groups under it.
+/// The menu bar and the command bar under it.
+///
+/// One row of icon buttons, grouped by hairlines: history, file, run, view.
+/// Every button carries its name, its shortcut and a one-line description in
+/// the tooltip. The instruction palette is not here: it sits on top of the
+/// document it inserts into (see [`centre`]), so the ribbon never clips it.
 pub fn ribbon(app: &mut EditorApp, ui: &mut Ui) {
     let tokens = app.tokens;
     menu_bar(app, ui);
     rule(ui, &tokens);
     ui.add_space(SPACE_1);
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = SPACE_1;
         ui.add_space(SPACE_2);
 
-        group(ui, "History", |ui| {
-            command(app, ui, "Undo", Action::Undo, "Ctrl+Z");
-            command(app, ui, "Redo", Action::Redo, "Ctrl+Shift+Z");
-        });
+        let can_undo = app.editor().can_undo();
+        let can_redo = app.editor().can_redo();
+        command(
+            app,
+            ui,
+            Icon::Undo,
+            "Undo",
+            Action::Undo,
+            "Ctrl+Z",
+            can_undo,
+        );
+        command(
+            app,
+            ui,
+            Icon::Redo,
+            "Redo",
+            Action::Redo,
+            "Ctrl+Shift+Z",
+            can_redo,
+        );
         separator(ui, &tokens);
-        group(ui, "File", |ui| {
-            command(app, ui, "New", Action::New, "Ctrl+N");
-            command(app, ui, "Open", Action::Open, "Ctrl+O");
-            command(app, ui, "Save", Action::Save, "Ctrl+S");
-            command(app, ui, "Save as", Action::SaveAs, "Ctrl+Shift+S");
-        });
+        command(app, ui, Icon::New, "New", Action::New, "Ctrl+N", true);
+        command(app, ui, Icon::Open, "Open", Action::Open, "Ctrl+O", true);
+        command(app, ui, Icon::Save, "Save", Action::Save, "Ctrl+S", true);
+        command(
+            app,
+            ui,
+            Icon::SaveAs,
+            "Save as",
+            Action::SaveAs,
+            "Ctrl+Shift+S",
+            true,
+        );
         separator(ui, &tokens);
-        group(ui, "Online", |ui| {
-            let running = app.is_running();
-            if ui
-                .add(
-                    egui::Button::new(if running { "Stop" } else { "Run" })
-                        .min_size(egui::vec2(52.0, 20.0)),
-                )
-                .on_hover_text(if running {
-                    "Stop the bench (Ctrl+R)"
-                } else {
-                    "Run the bench (Ctrl+R)"
-                })
-                .clicked()
-            {
-                app.handle(Action::RunStop);
-            }
-            command(app, ui, "Step", Action::SingleScan, "Ctrl+T");
-            command(app, ui, "Fill bench", Action::AutoFillBench, "Ctrl+Shift+A");
-            if running {
-                let cycles = app.bench().cycles();
-                quiet_pill(ui, tokens.run, &format!("RUN · {cycles}"));
-            } else {
-                quiet_pill(ui, tokens.text_dim, "STOP");
-            }
+
+        run_button(app, ui);
+        command(
+            app,
+            ui,
+            Icon::Step,
+            "Single scan",
+            Action::SingleScan,
+            "Ctrl+T",
+            true,
+        );
+        command(
+            app,
+            ui,
+            Icon::Bench,
+            "Fill the bench",
+            Action::AutoFillBench,
+            "Ctrl+Shift+A",
+            true,
+        );
+        separator(ui, &tokens);
+
+        command(
+            app,
+            ui,
+            Icon::ZoomOut,
+            "Zoom out",
+            Action::ZoomOut,
+            "Ctrl+-",
+            true,
+        );
+        command(
+            app,
+            ui,
+            Icon::ZoomIn,
+            "Zoom in",
+            Action::ZoomIn,
+            "Ctrl++",
+            true,
+        );
+        command(
+            app,
+            ui,
+            Icon::ZoomFit,
+            "Reset the view",
+            Action::ZoomReset,
+            "Ctrl+0",
+            true,
+        );
+        separator(ui, &tokens);
+
+        if icon_button(ui, &tokens, Icon::Address, app.show_addresses, true)
+            .on_hover_text("Show addresses\nShow the address under every tag name")
+            .clicked()
+        {
+            app.show_addresses = !app.show_addresses;
+        }
+        let dark = app.theme == crate::design::Theme::Dark;
+        let (icon, tip) = if dark {
+            (Icon::Sun, "Light theme\nSwitch to the light palette")
+        } else {
+            (Icon::Moon, "Dark theme\nSwitch to the dark palette")
+        };
+        if icon_button(ui, &tokens, icon, false, true)
+            .on_hover_text(tip)
+            .clicked()
+        {
+            app.theme = app.tokens.toggled().theme;
+        }
+
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            ui.add_space(SPACE_3);
             if !app.forces.is_empty() {
                 quiet_pill(ui, tokens.warning, &format!("{} forced", app.forces.len()));
             }
         });
-        separator(ui, &tokens);
-        group(ui, "View", |ui| {
-            command(app, ui, "−", Action::ZoomOut, "Ctrl+-");
-            command(app, ui, "+", Action::ZoomIn, "Ctrl++");
-            command(app, ui, "1:1", Action::ZoomReset, "Ctrl+0");
-            if ui
-                .selectable_label(app.show_addresses, "Addresses")
-                .on_hover_text("Show the address under every tag name")
-                .clicked()
-            {
-                app.show_addresses = !app.show_addresses;
-            }
-            if ui
-                .selectable_label(app.theme == crate::design::Theme::Dark, "Dark")
-                .on_hover_text("Switch the palette")
-                .clicked()
-            {
-                app.theme = app.tokens.toggled().theme;
-            }
-        });
-        separator(ui, &tokens);
-
-        // The element palette lives in the ribbon, the way every vendor tool
-        // puts its instruction set next to the commands.
-        ui.vertical(|ui| {
-            ui.label(
-                RichText::new("Insert")
-                    .size(TypeScale::CAPTION)
-                    .color(tokens.text_dim),
-            );
-            // The instruction set follows the language of the open section: the
-            // ladder palette for a ladder section, the chart's tools for an SFC
-            // one.
-            if crate::sfc::is_sfc(app.project(), app.selected_section) {
-                crate::sfc::palette(app, ui);
-            } else {
-                panels::palette::show(app, ui);
-            }
-        });
     });
     ui.add_space(SPACE_1);
-    rule(ui, &tokens);
 }
 
-/// One labelled command group, with the label under the buttons' row.
-fn group(ui: &mut Ui, title: &str, contents: impl FnOnce(&mut Ui)) {
-    ui.vertical(|ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = SPACE_1;
-            contents(ui);
-        });
-        ui.label(
-            RichText::new(title)
-                .size(TypeScale::CAPTION)
-                .color(ui.visuals().weak_text_color()),
-        );
-    });
+/// Side of a command button.
+const BUTTON: f32 = 28.0;
+/// Side of the icon inside a command button.
+const BUTTON_ICON: f32 = 16.0;
+
+/// A square icon button with a visible state: `selected` draws it pressed in,
+/// `enabled == false` greys it out and makes it inert.
+pub fn icon_button(
+    ui: &mut Ui,
+    tokens: &crate::design::Tokens,
+    icon: Icon,
+    selected: bool,
+    enabled: bool,
+) -> egui::Response {
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(BUTTON, BUTTON), sense);
+    let hovered = enabled && response.hovered();
+    let (fill, stroke) = if selected {
+        (
+            tokens.accent_soft,
+            egui::Stroke::new(1.0_f32, tokens.accent),
+        )
+    } else if hovered {
+        (tokens.surface, tokens.hairline())
+    } else {
+        (egui::Color32::TRANSPARENT, egui::Stroke::NONE)
+    };
+    ui.painter().rect(
+        rect,
+        egui::CornerRadius::same(crate::design::RADIUS_CONTROL),
+        fill,
+        stroke,
+        egui::StrokeKind::Inside,
+    );
+    let ink = if !enabled {
+        tokens.text_dim.gamma_multiply(0.5)
+    } else if selected {
+        tokens.accent
+    } else {
+        tokens.text
+    };
+    let glyph = egui::Rect::from_center_size(rect.center(), egui::vec2(BUTTON_ICON, BUTTON_ICON));
+    icons::draw_ink(ui.painter(), glyph, ink, icon);
+    response
 }
 
-/// A vertical separator between groups.
+/// The Run / Stop button: the one command whose state must be unmistakable, so
+/// it is filled in the colour of what it will do and labelled in words.
+fn run_button(app: &mut EditorApp, ui: &mut Ui) {
+    let tokens = app.tokens;
+    let running = app.is_running();
+    let (icon, label, fill, tip) = if running {
+        (Icon::Stop, "Stop", tokens.stop, "Stop the bench (Ctrl+R)")
+    } else {
+        (Icon::Play, "Run", tokens.run, "Run the bench (Ctrl+R)")
+    };
+    let font = egui::FontId::new(TypeScale::BODY, crate::design::semibold_family(ui.ctx()));
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font, egui::Color32::WHITE);
+    let width = SPACE_2 + BUTTON_ICON - 4.0 + SPACE_1 + galley.size().x + SPACE_3;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, BUTTON), egui::Sense::click());
+    let fill = if response.hovered() {
+        fill.gamma_multiply(0.85)
+    } else {
+        fill
+    };
+    ui.painter().rect_filled(
+        rect,
+        egui::CornerRadius::same(crate::design::RADIUS_CONTROL),
+        fill,
+    );
+    let glyph = egui::Rect::from_min_size(
+        egui::pos2(rect.left() + SPACE_2, rect.center().y - 6.0),
+        egui::vec2(12.0, 12.0),
+    );
+    icons::draw_ink(ui.painter(), glyph, egui::Color32::WHITE, icon);
+    ui.painter().galley(
+        egui::pos2(
+            glyph.right() + SPACE_1 + 2.0,
+            rect.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        egui::Color32::WHITE,
+    );
+    if response.on_hover_text(tip).clicked() {
+        app.handle(Action::RunStop);
+    }
+}
+
+/// A vertical hairline between command groups.
 fn separator(ui: &mut Ui, tokens: &crate::design::Tokens) {
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(SPACE_2, 34.0), egui::Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(SPACE_3, 20.0), egui::Sense::hover());
     ui.painter()
         .vline(rect.center().x, rect.y_range(), tokens.hairline());
 }
 
-/// One command button with its shortcut in the tooltip.
-fn command(app: &mut EditorApp, ui: &mut Ui, label: &str, action: Action, shortcut: &str) {
-    if ui
-        .button(label)
+/// One command button with its name and shortcut in the tooltip.
+fn command(
+    app: &mut EditorApp,
+    ui: &mut Ui,
+    icon: Icon,
+    label: &str,
+    action: Action,
+    shortcut: &str,
+    enabled: bool,
+) {
+    let tokens = app.tokens;
+    if icon_button(ui, &tokens, icon, false, enabled)
         .on_hover_text(format!("{label}  ({shortcut})\n{}", describe(&action)))
         .clicked()
     {
@@ -223,7 +347,7 @@ fn menu_bar(app: &mut EditorApp, ui: &mut Ui) {
         ui.menu_button("View", |ui| {
             for tab in CentreTab::ALL {
                 let selected = app.centre_tab == tab;
-                if ui.selectable_label(selected, tab.label()).clicked() {
+                if ui.selectable_label(selected, tab_label(app, tab)).clicked() {
                     ui.close_menu();
                     app.centre_tab = tab;
                 }
@@ -273,12 +397,8 @@ fn menu_bar(app: &mut EditorApp, ui: &mut Ui) {
                 app.show_about = true;
             }
         });
-        let project = app
-            .editor()
-            .path()
-            .and_then(|path| path.file_name())
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| "untitled".to_owned());
+        let project =
+            crate::queries::project_label(&app.editor().project().name, app.editor().path());
         let dirty = if app.editor().is_dirty() { " *" } else { "" };
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.label(
@@ -305,9 +425,21 @@ pub fn centre(app: &mut EditorApp, ui: &mut Ui) {
     rule(ui, &tokens);
     match app.centre_tab {
         CentreTab::Ladder => {
-            // The property strip edits the selected *ladder* element; an SFC
-            // section has its own inspector in the right-hand pane.
-            if !crate::sfc::is_sfc(app.project(), app.selected_section) {
+            // The instruction set sits on top of the document it inserts into
+            // and follows its language: the ladder palette for a ladder
+            // section, the chart's tools for an SFC one. It wraps instead of
+            // clipping, so every family stays reachable on a narrow window.
+            let sfc = crate::sfc::is_sfc(app.project(), app.selected_section);
+            ui.add_space(SPACE_1);
+            if sfc {
+                crate::sfc::palette(app, ui);
+            } else {
+                panels::palette::show(app, ui);
+            }
+            rule(ui, &tokens);
+            // The property strip edits the selected ladder element only while
+            // the inspector, which does the same job, is closed.
+            if !sfc && !app.show_inspector {
                 panels::properties::show(app, ui);
                 rule(ui, &tokens);
             }
@@ -320,20 +452,31 @@ pub fn centre(app: &mut EditorApp, ui: &mut Ui) {
     }
 }
 
+/// The label of a document tab.
+///
+/// An SFC section is its own document, so the program tab reads `SFC` while
+/// one is open rather than keeping the ladder's name on a chart.
+fn tab_label(app: &EditorApp, tab: CentreTab) -> String {
+    let problems = app.editor().problems().len();
+    match tab {
+        CentreTab::Ladder if crate::sfc::is_sfc(app.project(), app.selected_section) => {
+            "SFC".to_owned()
+        }
+        CentreTab::Problems if problems > 0 => format!("Problems ({problems})"),
+        CentreTab::Watch if !app.watch.is_empty() => {
+            format!("Watch & force ({})", app.watch.len())
+        }
+        _ => tab.label().to_owned(),
+    }
+}
+
 /// The document tab strip.
 fn tab_bar(app: &mut EditorApp, ui: &mut Ui) {
     let tokens = app.tokens;
-    let problems = app.editor().problems().len();
     ui.horizontal(|ui| {
         ui.add_space(SPACE_2);
         for tab in CentreTab::ALL {
-            let label = match tab {
-                CentreTab::Problems if problems > 0 => format!("{} ({problems})", tab.label()),
-                CentreTab::Watch if !app.watch.is_empty() => {
-                    format!("{} ({})", tab.label(), app.watch.len())
-                }
-                _ => tab.label().to_owned(),
-            };
+            let label = tab_label(app, tab);
             let active = app.centre_tab == tab;
             let text = if active {
                 RichText::new(label).color(tokens.accent).strong()

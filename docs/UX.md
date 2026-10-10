@@ -42,8 +42,7 @@ maintenance technician who has used one PLC brand expects to find.
 ┌───────────────────────────────────────────────────────────────────────────────────────────┐
 │ SoftLadder   File  Edit  Insert  Online  View  Tools  Help                                │  menu
 ├───────────────────────────────────────────────────────────────────────────────────────────┤
-│ ↶ ↷ │ ✂ ⧉ 📋 │ [ contacts | coils | timers | counters | compare | math | control ] │ ⏵ ⏹ ⏭ │
-│     │        │   (Insert group: palette as icon+label buttons, tooltips carry shortcuts) │
+│ ↶ ↷ │ 🗋 🗁 💾 💾+ │ [▶ Run] ⏭ ▤ │ ⊖ ⊕ ⛶ │ % ☾                            2 forced │  command bar
 ├──────────────────────┬────────────────────────────────────────────────────────────────────┤
 │ PROJECT              │ ‹Ladder: Main› ‹PLC tags› ‹Watch & force› ‹Bench› ‹Problems 2›      │  tabs
 │  ▾ SoftLadder PLC    ├────────────────────────────────────────────────────────────────────┤
@@ -64,18 +63,29 @@ maintenance technician who has used one PLC brand expects to find.
 │  Tag      %I0        │                                                                    │
 │  Comment  Start      │                                                                    │
 ├──────────────────────┴────────────────────────────────────────────────────────────────────┤
-│ ● Simulation  │ RUN │ cycles 412  scan 0.31 ms │ C:\…\line.slprj * │ 1 error 2 warnings │ 100% │
+│ SIM RUN │ cycles 412  scan 0.31 ms │ C:\…\line.slprj * │ 1 error 2 warnings │ 100% │
 └───────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 * **Left**: project tree (top pane) and inspector (bottom pane), both resizable, both collapsible.
-* **Centre**: tab bar + the active document. Tabs: one **Ladder** tab per section, plus **PLC tags**,
-  **Watch & force**, **Bench**, **Problems**. A dirty document shows a dot; the tab closes with `×`.
+* **Command bar**: one row of 28 pt icon buttons under the menu, grouped by hairlines (history, file,
+  run, view). Every button has a tooltip with its name, shortcut and a one-line description. Run/Stop
+  is the only labelled button: it is filled in the colour of what it will do, because the run state
+  must never be guessed.
+* **Palette**: the instruction set sits on top of the ladder document as a compact toolbar. Contacts,
+  coils and program control show their glyphs; blocks show their mnemonics (`TON`, `CTU`, `FIFO`).
+  Family, name and shortcut letter are in the tooltip, and the armed tool is filled with the accent.
+  The palette wraps to a second row on a narrow window and never clips.
+* **Centre**: tab bar + the active document. Tabs: one program tab per open section — **Ladder**, or
+  **SFC** while a chart section is open — plus **PLC tags**, **Watch & force**, **Bench**,
+  **Problems**. The menu shows the project name. A dirty document shows a dot; the tab closes with `×`.
 * **Right**: optional secondary pane (cross-reference, tag usage) — off by default.
 * **Bottom**: dockable pane for Problems / Watch table / Cross-reference, collapsible, with the
   status bar underneath.
-* **Status bar**: simulation badge, RUN/STOP/IDLE pill, cycle count, last scan time, project path
-  with `*` when dirty, error/warning counts (clickable → Problems), and the canvas zoom.
+* **Status bar**: one mode pill that cannot be misread — `SIM RUN`, `SIM SCAN`, `SIM STOP`, `FREEZE`
+  or `LOAD` — then the cycle count, the last scan time, the project path with `*` when dirty,
+  error/warning counts (clickable → Problems), and the canvas zoom. A single scan says `SIM SCAN`;
+  it never sits beside an "offline" badge.
 
 ## 4. Design tokens
 
@@ -90,7 +100,7 @@ toggle, not a separate design.
 | `paper_grid` | `#E8EAED` | `#2A2C30` | canvas grid |
 | `border` | `#D5D8DD` | `#3A3D42` | 1 px separators, panel outlines |
 | `text` | `#1B1D21` | `#E6E7E9` | primary text |
-| `text_dim` | `#6B7280` | `#9AA0A6` | addresses, units, secondary lines |
+| `text_dim` | `#5B6370` | `#9AA0A6` | addresses, units, secondary lines |
 | `accent` | `#0F6FC5` | `#4C9AFF` | selection, focus, active tab, links |
 | `accent_soft` | `#E3F0FC` | `#1E3A5F` | selected row/network background |
 | `energised` | `#00A65A` | `#35C46F` | live power flow, TRUE contacts |
@@ -103,8 +113,13 @@ toggle, not a separate design.
 * **Spacing scale**: 4, 8, 12, 16, 24. Nothing uses an off-scale value.
 * **Radius**: 4 for controls, 6 for cards/paper, 2 for pills and tags.
 * **Type**: 11 caption (addresses, units), 12 body (most UI), 13 emphasis (panel headers, tab
-  labels), 20 title (empty-state headings). One proportional family; **addresses and expressions are
-  monospace** so `%MW100` and `%MW1O0` are distinguishable.
+  labels), 20 title (empty-state headings). **Inter** is the interface family and **JetBrains Mono**
+  the monospace one, both embedded (`crates/softladder-ui/assets/fonts`, SIL OFL 1.1). Each has a
+  semibold family for emphasis (`design::semibold_family`, `design::mono_semibold_family`), since egui
+  has no font weights. **Addresses and expressions are monospace** so `%MW100` and `%MW1O0` are
+  distinguishable.
+* **Contrast**: every text colour meets WCAG AA (4.5:1) on every surface it is drawn on, in both
+  themes. `design.rs` tests this.
 * **Strokes**: 1 px borders, 2 px wires, 3 px energised wires, 2 px focus ring in `accent`.
 * **Icons**: a small hand-drawn vector set (16 px grid): contact NO/NC, edge, coil, set/reset, timer,
   counter, register, compare, operate, connection, jump, call, tag, watch, bench, play, stop, step,
@@ -126,8 +141,16 @@ toggle, not a separate design.
     pins: timer `IN/PT → Q/ET`, counter `CU/CD/R/LD → Q/CV`, register `R/IN/OUT → E/F`.
   * Compare and operate are boxes showing the expression, truncated with an ellipsis and a tooltip
     that shows it in full.
+* **Rails**: a left power rail, live while the bench is feeding the network, and a right return rail
+  just past the last coil. Each coil wires to that rail. The return rail stays `wire_idle`: it is
+  the common, not the power.
+* **Blocks stay in their network.** The band reserves the padding the box draws above its first pin
+  and below its last, so a counter is never cut by the next network's rule. The instance name sits
+  above the parameter (`PT 3000`, `PV 5`), not on one line with it.
 * **Live state**: energised wires and pin stubs are `energised` and 3 px; de-energised are `wire_idle`
-  and 2 px. Contacts show the tag and, in online mode, a small value chip (`1`/`0`, `TRUE`/`FALSE`).
+  and 2 px. A conducting contact or an energised coil is filled, not only stroked. Contacts show the
+  tag and, in online mode, a small value chip (`1`/`0`) beside the address, in the same size as the
+  label. Labels scale with the document zoom, so a tag does not stay 11 px while its cell shrinks.
   Blocks show `ET/PT` or `CV/PV` values while running. Lamps in the bench mirror `%Q`.
 * **Interaction**: hover highlights the cell with a 1 px `accent` outline; the armed palette tool
   shows a ghost preview; click places (replacing, one undo step); drag moves; `Del` deletes; a

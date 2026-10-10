@@ -199,7 +199,6 @@ fn apply(app: &mut EditorApp, panel: &SimulationPanel, actions: BenchActions) {
 fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
     let tokens = app.tokens;
     let running = app.is_running();
-    let scanning = app.bench.state().is_scanning();
     let mut start = false;
     let mut stop = false;
     let mut single = false;
@@ -264,15 +263,11 @@ fn toolbar(app: &mut EditorApp, ui: &mut Ui) {
                 .size(TypeScale::CAPTION)
                 .color(tokens.text_dim),
         );
-        if scanning {
-            if running {
-                pill(ui, tokens.run, "RUN");
-            } else {
-                pill(ui, tokens.accent, "SCAN");
-            }
-        } else {
-            pill(ui, tokens.stop, "STOP");
-        }
+        let _ = pill(
+            ui,
+            crate::panels::status::mode_colour(&tokens, app.bench.state()),
+            crate::queries::run_state_text(app.bench.state()),
+        );
     });
     if let Some(period_ms) = period_edit {
         let input_period_ms = app.project().scan.input_period_ms;

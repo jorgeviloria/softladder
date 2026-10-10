@@ -1136,7 +1136,14 @@ fn paint_steps(
         // The initial step is marked with a chip, the way GRAPH writes `Init`.
         if step.is_initial {
             let anchor = Pos2::new(rect.center().x, rect.top() - 10.0 * scale);
-            symbols::value_chip(painter, anchor, tokens, "init", false);
+            symbols::value_chip(
+                painter,
+                anchor,
+                tokens,
+                "init",
+                TypeScale::CAPTION * scale,
+                false,
+            );
         }
         // The elapsed time of an active step, in place.
         if active {
@@ -1145,9 +1152,10 @@ fn paint_steps(
                 // An opaque plate under the chip: the wire that feeds the next
                 // transition runs down this column, and a readout is a label, not
                 // another translucent tint over the drawing.
+                let chip_size = (TypeScale::CAPTION * scale).clamp(6.0, 22.0);
                 let galley = painter.layout_no_wrap(
                     value.clone(),
-                    FontId::new(TypeScale::CAPTION, FontFamily::Monospace),
+                    FontId::new(chip_size, FontFamily::Monospace),
                     tokens.energised,
                 );
                 painter.rect_filled(
@@ -1155,7 +1163,7 @@ fn paint_steps(
                     CornerRadius::same(RADIUS_PILL),
                     tokens.paper,
                 );
-                symbols::value_chip(painter, anchor, tokens, &value, true);
+                symbols::value_chip(painter, anchor, tokens, &value, chip_size, true);
             }
         }
         outline(

@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — schematic ladder (UI/UX U3)
+
+### Changed
+
+- **One mode pill.** The status bar no longer pairs an "Offline" badge with a `SCAN` pill. The
+  simulator is `SIM RUN`, `SIM SCAN`, `SIM STOP`, `FREEZE` or `LOAD`, and the same word is on the
+  bench toolbar. The menu shows the project name, and a chart section's document tab reads `SFC`.
+- **The ladder closes on a return rail.** Each coil wires to a neutral bus just past the last coil.
+  The bus stays the idle colour: it is the common, not the power. A conducting contact or an
+  energised coil is filled, not only stroked.
+- **A function block stays inside its network.** The band reserves the padding the box draws above
+  its first pin and below its last, so a counter is not cut by the next network's rule. The
+  parameter (`PT 3000`, `PV 5`) sits on its own line under the instance name.
+- **Labels and value chips scale with the zoom**, and the chip sits beside the address instead of
+  on it.
+
+## [Unreleased] — professional shell (UI/UX U1–U2, part one)
+
+### Added
+
+- **Inter and JetBrains Mono** are embedded (SIL OFL 1.1, see `NOTICE`) and replace egui's default
+  fonts: Inter for the interface, JetBrains Mono for addresses and expressions, plus semibold
+  families for emphasis.
+- **Command icons**: undo, redo, new, open, save, save as, play, stop, step, zoom in/out, fit,
+  address, moon, sun and search, in the same vector style as the rest of `panels/icons.rs`.
+
+### Changed
+
+- **The ribbon is one row of icon buttons** with tooltips (name, shortcut, description). Undo and
+  redo are disabled when there is nothing to undo or redo. Run/Stop is a filled button in the colour
+  of what it will do. The address and theme toggles show their state.
+- **The instruction palette moved onto the document** it inserts into, as a compact toolbar: glyphs
+  for contacts, coils and program control, mnemonics (`TON`, `CTU`, `FIFO`…) for blocks, and family
+  and shortcut in the tooltip. It wraps instead of clipping, so every instruction can be reached at
+  any window width. At 1440 px it fits in a single 36 px row.
+- The property strip above the canvas now shows only while the inspector, which does the same job,
+  is closed.
+- Secondary text (`text_dim`) is darker in the light theme. A test now checks both themes against
+  WCAG AA on every surface it sits on.
+
+### Removed
+
+- `design::caption`, which hard-coded a light-theme colour and had no callers.
+
 ## [Unreleased] — the shift and rotate carry
 
 ### Fixed

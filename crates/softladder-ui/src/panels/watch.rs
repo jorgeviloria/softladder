@@ -268,7 +268,7 @@ fn row_counts(app: &EditorApp, ui: &mut Ui) {
                 .color(tokens.text_dim),
         );
         if forced > 0 {
-            pill(ui, tokens.warning, &format!("{forced} forced"));
+            let _ = pill(ui, tokens.warning, &format!("{forced} forced"));
         } else {
             ui.label(
                 RichText::new("no forces active")

@@ -44,7 +44,7 @@ impl Style {
         Self {
             wire: Stroke::new(3.0_f32, tokens.energised),
             symbol: Stroke::new(2.5_f32, tokens.energised),
-            fill: tokens.energised.gamma_multiply(0.10),
+            fill: tokens.energised.gamma_multiply(0.22),
             text: tokens.text,
         }
     }
@@ -124,6 +124,16 @@ fn bars(painter: &Painter, rect: Rect, style: Style, gap: f32) {
 fn contact(painter: &Painter, rect: Rect, style: Style, negated: bool, marker: Option<&str>) {
     let y = rect.center().y;
     let gap = (rect.width() * BAR_GAP).max(3.0);
+    let half = (rect.height() * BAR_HALF).max(4.0);
+    // A conducting contact is filled, not only stroked: the green wire alone
+    // is easy to miss against the paper.
+    if style.fill.a() > 0 {
+        painter.rect_filled(
+            Rect::from_center_size(rect.center(), Vec2::new(gap * 2.0, half * 2.0)),
+            CornerRadius::same(2),
+            style.fill,
+        );
+    }
     painter.hline(rect.x_range().min..=(rect.center().x - gap), y, style.wire);
     painter.hline((rect.center().x + gap)..=rect.x_range().max, y, style.wire);
     bars(painter, rect, style, gap);
@@ -178,6 +188,14 @@ pub fn coil(painter: &Painter, rect: Rect, style: Style, coil: Coil) {
     let y = rect.center().y;
     let radius = (rect.height() * 0.30).max(5.0);
     let centre = rect.center().x;
+    if style.fill.a() > 0 {
+        let corner = (radius * 0.9).round().clamp(2.0, 255.0) as u8;
+        painter.rect_filled(
+            Rect::from_center_size(Pos2::new(centre, y), Vec2::new(radius * 2.2, radius * 1.8)),
+            CornerRadius::same(corner),
+            style.fill,
+        );
+    }
     painter.hline(rect.x_range().min..=(centre - radius), y, style.wire);
     painter.hline((centre + radius)..=rect.x_range().max, y, style.wire);
 
@@ -254,6 +272,25 @@ pub fn aligned_block_rect(
     Rect::from_min_size(
         Pos2::new(left, body_top - height * BLOCK_TOP),
         Vec2::new(width, height),
+    )
+}
+
+/// How far a block box climbs above its first cell and falls below its last.
+///
+/// [`aligned_block_rect`] pads the pin grid, so the drawn box is taller than
+/// the rows it occupies. `first_pin_from_cell_top` is the distance from the
+/// top of the first cell to the first pin (the canvas's label gutter plus
+/// half a glyph). The pair is `(above, below)` in the same units as
+/// `row_pitch`; a network that does not reserve both clips the box.
+pub fn block_margins(span: u8, row_pitch: f32, first_pin_from_cell_top: f32) -> (f32, f32) {
+    let span = f32::from(span.max(1));
+    let height = span * row_pitch / BLOCK_BODY;
+    let body_top = first_pin_from_cell_top - row_pitch * 0.5;
+    let rect_top = body_top - height * BLOCK_TOP;
+    let rect_bottom = rect_top + height;
+    (
+        (-rect_top).max(0.0),
+        (rect_bottom - span * row_pitch).max(0.0),
     )
 }
 
@@ -473,7 +510,7 @@ pub fn element_label(
     address: &str,
     show_address: bool,
 ) {
-    element_label_rect(painter, rect, tokens, name, address, show_address);
+    element_label_rect(painter, rect, tokens, name, address, show_address, 1.0);
 }
 
 /// [`element_label`], returning the rectangle the drawn lines occupy.
@@ -487,12 +524,20 @@ pub fn element_label_rect(
     name: Option<&str>,
     address: &str,
     show_address: bool,
+    scale: f32,
 ) -> Rect {
+    // The label is part of the schematic, so it shrinks with the cell. A fixed
+    // 11 px caption on a zoomed-out column lands on the wire beside it.
+    let size = if scale.is_finite() {
+        (TypeScale::CAPTION * scale).clamp(6.0, 22.0)
+    } else {
+        TypeScale::CAPTION
+    };
     let mut lines: Vec<(String, FontId, Color32)> = Vec::new();
     if let Some(name) = name {
         lines.push((
             name.to_owned(),
-            FontId::new(TypeScale::CAPTION, FontFamily::Proportional),
+            FontId::new(size, FontFamily::Proportional),
             tokens.text,
         ));
     }
@@ -504,7 +549,7 @@ pub fn element_label_rect(
         };
         lines.push((
             address.to_owned(),
-            FontId::new(TypeScale::CAPTION, FontFamily::Monospace),
+            FontId::new(size, FontFamily::Monospace),
             colour,
         ));
     }
@@ -525,8 +570,20 @@ pub fn element_label_rect(
 }
 
 /// A value chip drawn next to a live element (`1`, `0`, `TRUE`, `142`).
-pub fn value_chip(painter: &Painter, centre: Pos2, tokens: &Tokens, text: &str, live: bool) {
-    let font = FontId::new(TypeScale::CAPTION, FontFamily::Monospace);
+pub fn value_chip(
+    painter: &Painter,
+    centre: Pos2,
+    tokens: &Tokens,
+    text: &str,
+    size: f32,
+    live: bool,
+) {
+    let size = if size.is_finite() {
+        size.clamp(6.0, 22.0)
+    } else {
+        TypeScale::CAPTION
+    };
+    let font = FontId::new(size, FontFamily::Monospace);
     let colour = if live {
         tokens.energised
     } else {
@@ -558,7 +615,14 @@ mod tests {
                     "%I0",
                     true,
                 );
-                value_chip(ui.painter(), rect.center(), tokens, "TRUE", true);
+                value_chip(
+                    ui.painter(),
+                    rect.center(),
+                    tokens,
+                    "TRUE",
+                    TypeScale::CAPTION,
+                    true,
+                );
             });
         });
     }
@@ -635,5 +699,25 @@ mod tests {
         assert_eq!(idle.fill, Color32::TRANSPARENT);
         assert_eq!(idle.with_live(&tokens, true).colour(), tokens.energised);
         assert_eq!(live.with_live(&tokens, false).colour(), tokens.wire_idle);
+    }
+
+    #[test]
+    fn block_margins_cover_the_padded_box() {
+        let (above, below) = block_margins(4, 80.0, 56.0);
+        assert!(above > 0.0, "a four-row box climbs above its first cell");
+        assert!(below > 0.0, "a four-row box falls past its last cell");
+        let rect = aligned_block_rect(0.0, 96.0, 56.0, 4, 80.0);
+        assert!(
+            rect.top() >= -above - 0.01,
+            "top {} is above the reserved {}",
+            rect.top(),
+            -above
+        );
+        assert!(
+            rect.bottom() <= 4.0 * 80.0 + below + 0.01,
+            "bottom {} passes the reserved {}",
+            rect.bottom(),
+            4.0 * 80.0 + below
+        );
     }
 }

@@ -34,3 +34,21 @@ licenses named above rather than under the LGPL.
 
 Users migrating from ClassicLadder remain responsible for the licensing of
 their own project files and of the ClassicLadder build they migrate from.
+
+Bundled fonts
+-------------
+
+The editor (crates/softladder-ui/assets/fonts) embeds two typefaces, both
+licensed under the SIL Open Font License, Version 1.1. The license texts ship
+next to the font files.
+
+Inter 4.1
+  Copyright (c) 2016 The Inter Project Authors.
+  Project home: https://github.com/rsms/inter
+  Files: Inter-Regular.ttf, Inter-SemiBold.ttf (license: Inter-OFL.txt)
+
+JetBrains Mono 2.304
+  Copyright 2020 The JetBrains Mono Project Authors.
+  Project home: https://github.com/JetBrains/JetBrainsMono
+  Files: JetBrainsMono-Regular.ttf, JetBrainsMono-SemiBold.ttf
+  (license: JetBrainsMono-OFL.txt)

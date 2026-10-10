@@ -40,8 +40,8 @@ and a status bar of badges. [`UX.md`](UX.md) §3 has the full specification and 
   **Watch & force** monitors and forces variables; **Problems** lists the diagnostics.
 * **Right** — the inspector: whatever is selected (an element, a rung, a section, a bench widget),
   with the tag field, its validation, the parameters, the vertical link and the related commands.
-* **Bottom** — the status bar: simulation badge, run state, cycles, scan time, the project path with
-  `*` when dirty, clickable problem counts and the zoom.
+* **Bottom** — the status bar: one mode pill (`SIM RUN`, `SIM SCAN`, `SIM STOP`, `FREEZE`, `LOAD`),
+  cycles, scan time, the project path with `*` when dirty, clickable problem counts and the zoom.
 
 ## Placing and editing
 

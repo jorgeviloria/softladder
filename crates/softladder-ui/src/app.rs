@@ -404,6 +404,7 @@ impl EditorApp {
         if tokens != self.tokens {
             self.tokens = tokens;
         }
+        crate::design::install_fonts(ctx);
         self.tokens.apply(ctx);
         self.handle_close_request(ctx);
         self.handle_shortcuts(ctx);
@@ -1834,7 +1835,7 @@ mod tests {
         let mut app = EditorApp::new(project());
         frame(&mut app, &ctx, Vec::new());
         app.handle(Action::Pick(ElementKind::ContactNc));
-        let pos = egui::pos2(640.0, 400.0);
+        let pos = crate::canvas::cell_centre(&ctx, 1, 3, 0).expect("rung 1 is on screen");
         frame(
             &mut app,
             &ctx,
@@ -1891,7 +1892,7 @@ mod tests {
         frame(&mut app, &ctx, Vec::new());
         app.handle(Action::Pick(ElementKind::ContactNc));
 
-        let first = egui::pos2(640.0, 400.0);
+        let first = crate::canvas::cell_centre(&ctx, 1, 3, 0).expect("rung 1 is on screen");
         frame(
             &mut app,
             &ctx,

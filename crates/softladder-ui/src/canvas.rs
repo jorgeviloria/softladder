@@ -4,7 +4,7 @@
 //! Every rung of the open section is drawn as one *network*, the way TIA Portal,
 //! GX Works and Studio 5000 draw them: a numbered header with the rung title, its
 //! comment and a state badge, and under it a wiring area with the power rail, the
-//! cells of [`crate::layout`] and the IEC glyphs of [`crate::symbols`].
+//! return rail, the cells of [`crate::layout`] and the IEC glyphs of [`crate::symbols`].
 //!
 //! All geometry is in *document points* (points at zoom `1.0`) and is mapped to
 //! the screen by one [`Layout`] per network, so a pointer position still becomes
@@ -55,18 +55,21 @@ pub(crate) const ROW_PITCH: f32 = GLYPH_H + LABEL_GUTTER;
 /// points. A block gives its first row to this label and starts its box below.
 const BLOCK_LABEL_BAND: f32 = 17.0;
 
-/// Extra room a network leaves under a block, whose box is one row pitch tall
-/// per row the engine reads.
-const BLOCK_OVERHANG: f32 = 20.0;
-
 /// Blank space between a network header and its first row, in document points.
 ///
 /// The labels of the first row end just above their cell, so they need a little
 /// air under the header rather than sitting on the comment.
 const GRID_TOP_PAD: f32 = 8.0;
 
-/// Distance between the power rail and column zero, in document points.
+/// Distance between a power rail and the column it feeds, in document points.
+///
+/// The left rail sits this far before column zero; the return rail sits this
+/// far past the last coil.
 const RAIL_GAP: f32 = 20.0;
+
+/// How far a return rail extends past its top and bottom wire, in document
+/// points, so a single coil still reads as a bus and not as a dot.
+const RAIL_CAP: f32 = 10.0;
 
 /// Left offset of the wiring area inside the document, in document points.
 const GRID_LEFT: f32 = 34.0;
@@ -122,6 +125,18 @@ const FIT_MAX_ZOOM: f32 = 1.0;
 /// until nothing is readable; below this the document is framed on the selected
 /// network instead and panned like every vendor tool.
 const FIT_MIN_ZOOM: f32 = 0.8;
+
+/// Key of the per-frame record of where every network's grid was drawn.
+const GRIDS_ID: &str = "softladder-canvas-grids";
+
+/// The screen centre of `(col, row)` in rung `rung`, as the canvas drew it on
+/// the last frame; `None` before the first frame or for a rung not on screen.
+pub fn cell_centre(ctx: &egui::Context, rung: u32, col: u8, row: u8) -> Option<Pos2> {
+    let grids: Vec<(u32, layout::Layout)> =
+        ctx.data(|data| data.get_temp(egui::Id::new(GRIDS_ID)))?;
+    let (_, grid) = grids.into_iter().find(|(id, _)| *id == rung)?;
+    Some(layout::cell_rect(col, row, grid).center())
+}
 
 /// Draws the ladder document and turns pointer input into editor calls.
 pub fn show(app: &mut EditorApp, ui: &mut Ui) {
@@ -204,6 +219,15 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     handle_zoom(app, ui, &response, paper);
     handle_pan(app, &response, space);
     let view = View::new(paper, app.camera);
+    // Where each network's grid landed on screen this frame, so a test (or an
+    // automation driving the real interface) can aim at a cell instead of at a
+    // pixel that moves whenever the chrome around the canvas changes.
+    let grids: Vec<(u32, layout::Layout)> = networks
+        .iter()
+        .map(|network| (network.rung.id, view.layout(network.grid_top())))
+        .collect();
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(egui::Id::new(GRIDS_ID), grids));
 
     // Everything below is read-only state for one frame, gathered before any
     // edit so painting can borrow the project and the store.
@@ -325,6 +349,11 @@ struct Network {
     cols: u8,
     /// Number of wrapped comment lines.
     comment_lines: usize,
+    /// Space between the header and the first cell, in document points.
+    ///
+    /// At least a gutter, and more when a block's box would otherwise climb
+    /// into the comment.
+    lead: f32,
 }
 
 impl Network {
@@ -352,10 +381,11 @@ impl Network {
     /// Top of the wiring area, in document points.
     ///
     /// The first row's tag name and address are drawn *above* its glyph, in the
-    /// label gutter, so the wiring area starts a gutter below the header or the
-    /// labels would collide with the comment.
+    /// label gutter, so the wiring area starts below the header or the labels
+    /// would collide with the comment. [`Network::lead`] is that gap, and it
+    /// grows when a block box needs the room.
     fn grid_top(&self) -> f32 {
-        self.top + self.header_height() + GRID_TOP_PAD + LABEL_GUTTER
+        self.top + self.header_height() + self.lead
     }
 }
 
@@ -456,15 +486,20 @@ fn read_networks(app: &EditorApp, painter: &Painter, tokens: &Tokens) -> Vec<Net
             .saturating_add(2)
             .max(DOC_COLS)
             .min(layout::MAX_COL.saturating_add(1));
-        let has_block = rung.elements.iter().any(|element| is_block(element.kind));
-        let height = header_height(!rung.label.trim().is_empty(), comment_lines)
-            + GRID_TOP_PAD
-            + if rung.elements.is_empty() {
-                EMPTY_NETWORK_H
-            } else {
-                f32::from(rows) * ROW_PITCH + SPACE_2
-            }
-            + if has_block { BLOCK_OVERHANG } else { 0.0 };
+        // The box of a counter is taller than the rows it reads: the pin grid
+        // is padded. `lead` keeps that padding under the header and `tail`
+        // keeps it above the next network's rule. A rung of contacts has
+        // neither, and still leaves the label gutter the first row draws in.
+        let (block_above, block_below) = block_clearance(rung);
+        let lead = (GRID_TOP_PAD + LABEL_GUTTER).max(block_above + GRID_TOP_PAD);
+        let body = if rung.elements.is_empty() {
+            EMPTY_NETWORK_H
+        } else {
+            f32::from(rows) * ROW_PITCH
+        };
+        let tail = SPACE_2 + block_below;
+        let height =
+            header_height(!rung.label.trim().is_empty(), comment_lines) + lead + body + tail;
         networks.push(Network {
             rung: rung.clone(),
             number: index + 1,
@@ -473,6 +508,7 @@ fn read_networks(app: &EditorApp, painter: &Painter, tokens: &Tokens) -> Vec<Net
             rows,
             cols,
             comment_lines,
+            lead,
         });
         top += height + NETWORK_GAP;
     }
@@ -1068,6 +1104,81 @@ fn paint_wires(
         let live = frame.live && (state.fed || state.live || above.live);
         painter.line_segment([from, to], Style::idle(tokens).with_live(tokens, live).wire);
     }
+
+    paint_return_rail(painter, network, grid, tokens, frame, power, zoom);
+}
+
+/// How far the tallest block in `rung` sticks out of the cells it occupies.
+///
+/// `(above, below)` in document points, both zero when the rung has no block.
+fn block_clearance(rung: &Rung) -> (f32, f32) {
+    let first_pin = LABEL_GUTTER + GLYPH_H * 0.5;
+    rung.elements
+        .iter()
+        .filter(|element| is_block(element.kind))
+        .map(|element| {
+            symbols::block_margins(queries::block_span(element.kind), ROW_PITCH, first_pin)
+        })
+        .fold((0.0, 0.0), |(above, below), (next_above, next_below)| {
+            (above.max(next_above), below.max(next_below))
+        })
+}
+
+/// The coils a return rail connects, as `(column, row)` in element order.
+fn return_coils(rung: &Rung) -> Vec<(u8, u8)> {
+    rung.elements
+        .iter()
+        .filter(|element| symbols::coil_of(element.kind).is_some())
+        .map(|element| (element.col, element.row))
+        .collect()
+}
+
+/// The right-hand return rail: each coil wires to a neutral bus just past the
+/// last one, the way a ladder closes between two rails.
+///
+/// The bus stays [`Tokens::wire_idle`]. It is the common, not the power; the
+/// stub that reaches it carries the coil's own state.
+fn paint_return_rail(
+    painter: &Painter,
+    network: &Network,
+    grid: Layout,
+    tokens: &Tokens,
+    frame: &Frame<'_>,
+    power: &[CellPower],
+    zoom: f32,
+) {
+    let mut stubs: Vec<(f32, f32, bool)> = Vec::new();
+    let mut right = f32::NEG_INFINITY;
+    for (col, row) in return_coils(&network.rung) {
+        if col >= network.cols || row >= network.rows {
+            continue;
+        }
+        let glyph = glyph_rect(layout::cell_rect(col, row, grid), zoom);
+        if !glyph.is_positive() {
+            continue;
+        }
+        let state = queries::cell_state(power, col, row);
+        right = right.max(glyph.right());
+        stubs.push((glyph.center().y, glyph.right(), frame.live && state.live));
+    }
+    if stubs.is_empty() || !right.is_finite() {
+        return;
+    }
+    let rail_x = right + RAIL_GAP * zoom;
+    let cap = RAIL_CAP * zoom;
+    let mut top = f32::INFINITY;
+    let mut bottom = f32::NEG_INFINITY;
+    for (y, from, live) in stubs {
+        let style = Style::idle(tokens).with_live(tokens, live);
+        painter.hline(from..=rail_x, y, style.wire);
+        top = top.min(y);
+        bottom = bottom.max(y);
+    }
+    painter.vline(
+        rail_x,
+        (top - cap)..=(bottom + cap),
+        Stroke::new(3.0_f32, tokens.wire_idle),
+    );
 }
 
 /// Draws one element's glyph, its label and its live value.
@@ -1131,20 +1242,36 @@ fn paint_element(
     }
 
     let (name, address) = label_texts(frame.project(), element);
+    // Labels are schematic content: they follow the camera, or a zoomed-out
+    // column keeps an 11 px caption and the tag lands on the next wire.
+    let scale = view.zoom;
     let label = if is_block(element.kind) {
-        // A block names itself in one line: its tag, or the instance, which is
-        // the name a user gives a timer or a counter.
-        let text = match block_parameter_text(element) {
-            Some(parameter) => {
-                let name = name.unwrap_or(address.as_str());
-                format!("{name} · {parameter}")
-            }
-            None => name.unwrap_or(address.as_str()).to_owned(),
-        };
-        symbols::element_label_rect(painter, label_anchor, tokens, Some(&text), "", false)
+        // The instance (or its tag) over the parameter. One jammed line
+        // (`green_lamp · PT 3000`) is wider than the column.
+        let title = name.unwrap_or(address.as_str()).to_owned();
+        match block_parameter_text(element) {
+            Some(parameter) => symbols::element_label_rect(
+                painter,
+                label_anchor,
+                tokens,
+                Some(&title),
+                &parameter,
+                true,
+                scale,
+            ),
+            None => symbols::element_label_rect(
+                painter,
+                label_anchor,
+                tokens,
+                Some(&title),
+                "",
+                false,
+                scale,
+            ),
+        }
     } else if frame.show_addresses() {
         // The View toggle drops the tag names and shows the address alone.
-        symbols::element_label_rect(painter, label_anchor, tokens, None, &address, true)
+        symbols::element_label_rect(painter, label_anchor, tokens, None, &address, true, scale)
     } else {
         // The tag name over its address; an element without a tag shows the
         // address alone.
@@ -1155,6 +1282,7 @@ fn paint_element(
             name,
             &address,
             name.is_some(),
+            scale,
         )
     };
     if frame.live {
@@ -1176,21 +1304,26 @@ fn paint_value_chip(
     if !label.is_positive() {
         return;
     }
-    let font = view.font(TypeScale::CAPTION, FontFamily::Monospace);
+    let font_size = view.font(TypeScale::CAPTION, FontFamily::Monospace).size;
     let colour = if live {
         tokens.energised
     } else {
         tokens.text_dim
     };
-    let size = painter
-        .layout_no_wrap(value.to_owned(), font, colour)
-        .size()
-        + Vec2::new(6.0, 2.0);
+    let drawn = painter
+        .layout_no_wrap(
+            value.to_owned(),
+            FontId::new(font_size, FontFamily::Monospace),
+            colour,
+        )
+        .size();
+    let chip = drawn + Vec2::new(6.0, 2.0);
+    // Beside the address, on its own line, so a `0` does not sit on the text.
     let anchor = Pos2::new(
-        label.right() + 3.0 + size.x / 2.0,
-        label.bottom() - size.y / 2.0,
+        label.right() + 4.0 + chip.x / 2.0,
+        label.bottom() - drawn.y / 2.0,
     );
-    symbols::value_chip(painter, anchor, tokens, value, live);
+    symbols::value_chip(painter, anchor, tokens, value, font_size, live);
 }
 
 /// The live value of a contact or a coil, as `1` or `0`.
@@ -2226,6 +2359,62 @@ mod tests {
             queries::element_at_cell(&rung, 1, 4).is_none(),
             "past the end"
         );
+    }
+
+    #[test]
+    fn a_tall_block_stays_inside_its_network() {
+        let rung = Rung {
+            elements: vec![PlacedElement::with_var(
+                ElementKind::Counter {
+                    kind: CounterKind::Up,
+                },
+                VarRef::new(VarKind::Counter, 0),
+                1,
+                0,
+            )],
+            ..Rung::new(1)
+        };
+        let app = EditorApp::new(project_with(rung));
+        let networks = with_painter(|painter| read_networks(&app, painter, &Tokens::light()));
+        let network = networks.first().expect("one network");
+        let span = queries::block_span(ElementKind::Counter {
+            kind: CounterKind::Up,
+        });
+        let (above, below) = symbols::block_margins(span, ROW_PITCH, LABEL_GUTTER + GLYPH_H * 0.5);
+        let cell_top = network.grid_top();
+        assert!(
+            cell_top - above >= network.header().bottom() - 0.01,
+            "the box climbs into the header"
+        );
+        assert!(
+            cell_top + f32::from(span) * ROW_PITCH + below <= network.bottom() + 0.01,
+            "the box falls into the next network"
+        );
+    }
+
+    #[test]
+    fn the_return_rail_follows_the_coils_only() {
+        let mut rung = Rung::new(1);
+        rung.elements.push(PlacedElement::with_var(
+            ElementKind::ContactNo,
+            var("%I0"),
+            0,
+            0,
+        ));
+        assert!(return_coils(&rung).is_empty(), "a contact is not an output");
+        rung.elements.push(PlacedElement::with_var(
+            ElementKind::CoilOut,
+            var("%Q0"),
+            2,
+            0,
+        ));
+        rung.elements.push(PlacedElement::with_var(
+            ElementKind::CoilOut,
+            var("%Q1"),
+            2,
+            1,
+        ));
+        assert_eq!(return_coils(&rung), vec![(2, 0), (2, 1)]);
     }
 
     #[test]

@@ -413,13 +413,13 @@ fn summary_line(ui: &mut Ui, tokens: &Tokens, rows: &[ProblemRow]) {
                 .strong(),
         );
         if errors > 0 {
-            pill(ui, tokens.error, &format!("{errors} error(s)"));
+            let _ = pill(ui, tokens.error, &format!("{errors} error(s)"));
         }
         if warnings > 0 {
-            pill(ui, tokens.warning, &format!("{warnings} warning(s)"));
+            let _ = pill(ui, tokens.warning, &format!("{warnings} warning(s)"));
         }
         if rows.is_empty() {
-            pill(ui, tokens.run, "clean");
+            let _ = pill(ui, tokens.run, "clean");
         }
     });
     ui.add_space(SPACE_1);

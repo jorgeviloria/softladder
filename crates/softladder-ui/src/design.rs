@@ -5,7 +5,119 @@
 //! industrial programming tool puts it on paper; dark is a toggle, not a
 //! separate design. See `docs/UX.md` §4 for the table these values come from.
 
-use egui::{Color32, CornerRadius, Stroke, Visuals};
+use std::sync::Arc;
+
+use egui::{Color32, CornerRadius, FontData, FontDefinitions, FontFamily, Stroke, Visuals};
+
+/// Inter, the interface typeface (SIL OFL 1.1, `assets/fonts/Inter-OFL.txt`).
+const INTER_REGULAR: &[u8] = include_bytes!("../assets/fonts/Inter-Regular.ttf");
+/// Inter SemiBold, for headers and emphasis.
+const INTER_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/Inter-SemiBold.ttf");
+/// JetBrains Mono, for addresses and expressions (SIL OFL 1.1,
+/// `assets/fonts/JetBrainsMono-OFL.txt`): `%MW100` and `%MW1O0` must not look
+/// alike.
+const MONO_REGULAR: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf");
+/// JetBrains Mono SemiBold, for emphasised values.
+const MONO_SEMIBOLD: &[u8] = include_bytes!("../assets/fonts/JetBrainsMono-SemiBold.ttf");
+
+/// Name of the semibold proportional family; see [`semibold_family`].
+const SEMIBOLD: &str = "softladder-semibold";
+/// Name of the semibold monospace family; see [`mono_semibold_family`].
+const MONO_SEMIBOLD_FAMILY: &str = "softladder-mono-semibold";
+
+/// The semibold interface family, for panel headers, titles and emphasis.
+///
+/// egui has no font weights, so a weight is a family of its own. The family is
+/// bound only from the frame after [`install_fonts`] runs, so until then (and
+/// in any context that never installed them) this is the regular family.
+pub fn semibold_family(ctx: &egui::Context) -> FontFamily {
+    bound_or_regular(
+        ctx,
+        FontFamily::Name(SEMIBOLD.into()),
+        FontFamily::Proportional,
+    )
+}
+
+/// The semibold monospace family, for live values that must stand out; falls
+/// back like [`semibold_family`].
+pub fn mono_semibold_family(ctx: &egui::Context) -> FontFamily {
+    bound_or_regular(
+        ctx,
+        FontFamily::Name(MONO_SEMIBOLD_FAMILY.into()),
+        FontFamily::Monospace,
+    )
+}
+
+/// `family` when the context's fonts bind it, `regular` otherwise: asking egui
+/// for an unbound family panics.
+fn bound_or_regular(ctx: &egui::Context, family: FontFamily, regular: FontFamily) -> FontFamily {
+    if ctx.fonts(|fonts| fonts.families().contains(&family)) {
+        family
+    } else {
+        regular
+    }
+}
+
+/// The font set the interface draws with: Inter and JetBrains Mono first, with
+/// egui's bundled fonts kept behind them as fallbacks for symbols and emoji.
+pub fn font_definitions() -> FontDefinitions {
+    let mut fonts = FontDefinitions::default();
+    for (name, bytes) in [
+        ("Inter-Regular", INTER_REGULAR),
+        ("Inter-SemiBold", INTER_SEMIBOLD),
+        ("JetBrainsMono-Regular", MONO_REGULAR),
+        ("JetBrainsMono-SemiBold", MONO_SEMIBOLD),
+    ] {
+        fonts
+            .font_data
+            .insert(name.to_owned(), Arc::new(FontData::from_static(bytes)));
+    }
+    let fallbacks = |family: &FontFamily, fonts: &FontDefinitions| {
+        fonts.families.get(family).cloned().unwrap_or_default()
+    };
+    let proportional = fallbacks(&FontFamily::Proportional, &fonts);
+    let monospace = fallbacks(&FontFamily::Monospace, &fonts);
+    let with_first = |first: &str, rest: &[String]| {
+        std::iter::once(first.to_owned())
+            .chain(rest.iter().cloned())
+            .collect::<Vec<_>>()
+    };
+    fonts.families.insert(
+        FontFamily::Proportional,
+        with_first("Inter-Regular", &proportional),
+    );
+    fonts.families.insert(
+        FontFamily::Monospace,
+        with_first("JetBrainsMono-Regular", &monospace),
+    );
+    fonts.families.insert(
+        FontFamily::Name(SEMIBOLD.into()),
+        with_first("Inter-SemiBold", &proportional),
+    );
+    fonts.families.insert(
+        FontFamily::Name(MONO_SEMIBOLD_FAMILY.into()),
+        with_first("JetBrainsMono-SemiBold", &monospace),
+    );
+    fonts
+}
+
+/// Installs [`font_definitions`] on `ctx` once.
+///
+/// `set_fonts` rebuilds the font atlas, so it must not run every frame; the
+/// marker lives in the context's own memory, which makes it correct for every
+/// context (the window's and each headless one the screenshot tests create).
+/// The fonts take effect from the next frame on.
+pub fn install_fonts(ctx: &egui::Context) {
+    let marker = egui::Id::new("softladder-fonts-installed");
+    if ctx
+        .data(|data| data.get_temp::<bool>(marker))
+        .unwrap_or(false)
+    {
+        return;
+    }
+    ctx.set_fonts(font_definitions());
+    ctx.data_mut(|data| data.insert_temp(marker, true));
+}
 
 /// Which palette is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -103,7 +215,7 @@ impl Tokens {
             paper_grid: Color32::from_rgb(0xE8, 0xEA, 0xED),
             border: Color32::from_rgb(0xD5, 0xD8, 0xDD),
             text: Color32::from_rgb(0x1B, 0x1D, 0x21),
-            text_dim: Color32::from_rgb(0x6B, 0x72, 0x80),
+            text_dim: Color32::from_rgb(0x5B, 0x63, 0x70),
             accent: Color32::from_rgb(0x0F, 0x6F, 0xC5),
             accent_soft: Color32::from_rgb(0xE3, 0xF0, 0xFC),
             energised: Color32::from_rgb(0x00, 0xA6, 0x5A),
@@ -212,7 +324,7 @@ impl Tokens {
         ctx.set_visuals(visuals);
 
         let mut style = (*ctx.style()).clone();
-        use egui::{FontFamily, FontId, TextStyle};
+        use egui::{FontId, TextStyle};
         let proportional = FontFamily::Proportional;
         let monospace = FontFamily::Monospace;
         style.text_styles = [
@@ -274,7 +386,7 @@ pub fn rule(ui: &mut egui::Ui, tokens: &Tokens) {
 }
 
 /// A status pill: a rounded, tinted chip used for RUN/STOP, counts and badges.
-pub fn pill(ui: &mut egui::Ui, colour: Color32, text: &str) {
+pub fn pill(ui: &mut egui::Ui, colour: Color32, text: &str) -> egui::Response {
     let font = egui::FontId::new(TypeScale::CAPTION, egui::FontFamily::Proportional);
     let galley = ui.painter().layout_no_wrap(
         text.to_owned(),
@@ -282,11 +394,12 @@ pub fn pill(ui: &mut egui::Ui, colour: Color32, text: &str) {
         Color32::WHITE.gamma_multiply(1.0),
     );
     let size = egui::vec2(galley.size().x + SPACE_3, galley.size().y + SPACE_1);
-    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(size, egui::Sense::hover());
     ui.painter()
         .rect_filled(rect, CornerRadius::same(RADIUS_PILL), colour);
     ui.painter()
         .galley(rect.center() - galley.size() / 2.0, galley, Color32::WHITE);
+    response
 }
 
 /// A muted, tinted "quiet" pill, used for counts and badges.
@@ -305,13 +418,6 @@ pub fn quiet_pill(ui: &mut egui::Ui, colour: Color32, text: &str) {
     );
     ui.painter()
         .galley(rect.center() - galley.size() / 2.0, galley, colour);
-}
-
-/// Text in the caption style, in the dim colour.
-pub fn caption(text: impl Into<String>) -> egui::RichText {
-    egui::RichText::new(text.into())
-        .size(TypeScale::CAPTION)
-        .color(Color32::from_rgb(0x6B, 0x72, 0x80))
 }
 
 /// Text in the caption style with an explicit colour.
@@ -434,10 +540,16 @@ mod tests {
             ratio(light.text, light.panel) >= 7.0,
             "primary text is not AAA"
         );
-        assert!(
-            ratio(light.text_dim, light.panel) >= 4.0,
-            "secondary text is too faint"
-        );
+        // WCAG AA for body text, on every surface secondary text sits on.
+        for background in [light.panel, light.surface, light.accent_soft] {
+            let contrast = ratio(light.text_dim, background);
+            assert!(contrast >= 4.5, "secondary text is not AA: {contrast}");
+        }
+        let dark = Tokens::dark();
+        for background in [dark.panel, dark.surface, dark.paper] {
+            let contrast = ratio(dark.text_dim, background);
+            assert!(contrast >= 4.5, "dark secondary text is not AA: {contrast}");
+        }
         let contrast = ratio(light.energised, light.paper);
         assert!(contrast >= 3.0, "the live colour is too faint: {contrast}");
     }
