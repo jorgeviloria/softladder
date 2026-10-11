@@ -13,6 +13,8 @@
 //!   timeout and retries (M5 slice two).
 //! * [`modbus_rtu`] — RTU framing (CRC-16 + codec) over the same PDU (M5 slice
 //!   three); the serial line itself waits for hardware.
+//! * [`modbus_driver`] — polling Modbus TCP master as an [`IoDriver`] (M5 slice
+//!   four): the map-driven scan loop against a real or simulated slave.
 //! * [`gpio`] — Linux GPIO character device and Raspberry Pi headers (M5).
 //! * [`hal`] — LinuxCNC-style HAL pins and signals (M7).
 
@@ -23,11 +25,13 @@ pub mod gpio;
 pub mod hal;
 pub mod image;
 pub mod modbus;
+pub mod modbus_driver;
 pub mod modbus_rtu;
 pub mod modbus_tcp;
 pub mod sim;
 
 pub use image::{IoDriver, IoError, IoImage};
 pub use modbus::{AnalogKind, AnalogMap, ModbusMap, WordOrder};
+pub use modbus_driver::ModbusMasterDriver;
 pub use modbus_tcp::{SlaveStore, TcpMaster};
 pub use sim::{ScriptPlayer, SimDriver, SimEvent, SimScript};

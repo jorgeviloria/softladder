@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Modbus master driver (M5, slice four)
+
+### Added
+
+- **Polling Modbus TCP master as an `IoDriver`.** `ModbusMasterDriver` reads discrete inputs and
+  input registers into the image and pushes coils and holding registers out of it, all through
+  the configured `ModbusMap` and chunked to the protocol limits. Any socket, timeout, protocol
+  or slave-exception failure surfaces as `IoError::Driver`; retries stay in the driver,
+  fail-safe stays in the runtime. Covered by loopback tests against the in-memory slave,
+  including a 3000-channel chunked poll.
+
 ## [Unreleased] — Modbus RTU framing (M5, slice three)
 
 ### Added
