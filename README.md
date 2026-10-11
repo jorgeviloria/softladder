@@ -66,7 +66,8 @@ codec-tested). What works today:
   junctions, and every chart edit an undoable command ([`docs/UX.md`](docs/UX.md) §12);
 - **IO, in progress** — the simulator plays deterministic input timelines (`SimScript`) behind the
   future `.sltest` harness; a blocking Modbus TCP master (timeout + retries) and an in-memory
-  slave serve the configurable map (`I16`/`U16`/`F32`, scale, offset, word order), and the RTU
+  slave serve the configurable map (`I16`/`U16`/`F32`, scale, offset, word order), the master
+  doubles as a polling scan driver (`ModbusMasterDriver`), and the RTU
   framing codec is tested. Serial line, GPIO and HAL are still stubs;
 - **ClassicLadder import and export**, validated against all 41 upstream example projects
   ([`docs/COMPAT.md`](docs/COMPAT.md), [`testdata/known-divergences.md`](testdata/known-divergences.md));
