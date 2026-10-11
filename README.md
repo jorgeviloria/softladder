@@ -34,8 +34,8 @@ rebuilds everything around it:
 - **Simulation bench** — a panel of switches, push-buttons, lamps, sliders and gauges that is part of
   the project, so you can commission the logic before touching hardware. The program's `%I`/`%Q`
   variables are wired to the bench automatically.
-- **Testing** — `.sltest` scenarios assert outputs against a scripted input timeline and run in CI.
-  Your PLC program finally gets unit tests.
+- **Testing** — `.sltest` scenarios assert outputs against a scripted input timeline and run in CI
+  (`softladder test`). Your PLC program finally gets unit tests.
 - **Runtime** — deterministic fixed-step scan, scan statistics and jitter measurement, flight
   recorder with exact replay of an incident, fail-safe output policy, optional real-time priority.
 - **IO** — scriptable simulator, Modbus TCP master and slave over a configurable register map
@@ -87,7 +87,7 @@ There are no display servers in CI, so the interface is reviewed with headless s
 | M5 | IO: scriptable sim, configurable Modbus map, TCP master/slave and RTU framing done; serial line, GPIO (in progress) |
 | M6 | Online monitor, web dashboard, alarms and journal |
 | M7 | Physical IO (GPIO) + LinuxCNC HAL bridge |
-| M8 | `.sltest` harness, flight recorder, replay, fuzzing |
+| M8 | `.sltest` scenarios + `softladder test` done; flight recorder live, replay/fuzzing pending |
 | M9 | Extras: ST/IL/FBD, PID/PWM, PLCopen XML, WASM, packaging |
 
 See [`docs/PLAN.md`](docs/PLAN.md) (Spanish) for the full plan, milestones and acceptance criteria.
@@ -117,6 +117,7 @@ cargo test -p softladder-ui --test ui_shots    # writes target/ui-shots/*.png
 cargo test --workspace            # unit tests (570+ tests)
 cargo run -p softladder-ui        # desktop editor (run it from the repo root)
 cargo run -p softladder-cli -- run examples/traffic_light.slprj --cycles 500   # deterministic
+cargo run -p softladder-cli -- test examples/traffic_light.slprj examples/traffic_light.sltest
 cargo run -p softladder-cli -- run examples/traffic_light.slprj --real-time    # wall-clock pacing
 cargo run -p softladder-cli -- lint examples/traffic_light.slprj
 cargo run -p softladder-cli -- import my_project.clprj -o my_project.slprj
