@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — the example counter counts again
+
+### Fixed
+
+- **The traffic-light counter never counted.** Its `%I1` pulse entered on row 0, the counter's
+  `R` (reset) row, while count-up lives on row 2 (`R/LD/CU/CD` read rows 0–3) — so every
+  vehicle held reset instead of counting. The contact now feeds the `CU` row, the unused
+  `R`/`LD`/`CD` rows are tied off with the always-false `spare_off` bit (an unwired row is a
+  well-deserved `SL-W001`), and the `.sltest` example pulses `%I1` five times asserting
+  `%C0.V` 1–5 and `%C0.D`.
+
 ## [Unreleased] — ladder scroll and honest block pins
 
 ### Changed

@@ -6,13 +6,29 @@
     {"cycle": 2, "var": "%I0", "value": true},
     {"cycle": 3, "var": "%I0", "value": false},
     {"cycle": 5, "var": "%I2", "value": true},
-    {"cycle": 6, "var": "%I2", "value": false}
+    {"cycle": 6, "var": "%I2", "value": false},
+    {"cycle": 10, "var": "%I1", "value": true},
+    {"cycle": 11, "var": "%I1", "value": false},
+    {"cycle": 12, "var": "%I1", "value": true},
+    {"cycle": 13, "var": "%I1", "value": false},
+    {"cycle": 14, "var": "%I1", "value": true},
+    {"cycle": 15, "var": "%I1", "value": false},
+    {"cycle": 16, "var": "%I1", "value": true},
+    {"cycle": 17, "var": "%I1", "value": false},
+    {"cycle": 18, "var": "%I1", "value": true},
+    {"cycle": 19, "var": "%I1", "value": false}
   ],
   "assertions": [
     {"cycle": 0, "var": "%Q0", "expected": false},
     {"cycle": 2, "var": "%Q0", "expected": true},
     {"cycle": 3, "var": "%Q0", "expected": true},
     {"cycle": 5, "var": "%Q0", "expected": false},
-    {"cycle": 6, "var": "%Q0", "expected": false}
+    {"cycle": 6, "var": "%Q0", "expected": false},
+    {"cycle": 11, "var": "%C0.V", "expected": 1},
+    {"cycle": 13, "var": "%C0.V", "expected": 2},
+    {"cycle": 15, "var": "%C0.V", "expected": 3},
+    {"cycle": 17, "var": "%C0.V", "expected": 4},
+    {"cycle": 19, "var": "%C0.V", "expected": 5},
+    {"cycle": 19, "var": "%C0.D", "expected": true}
   ]
 }

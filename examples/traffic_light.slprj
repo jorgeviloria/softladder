@@ -38,9 +38,12 @@
     {
       "id": 3,
       "label": "vehicle_counter",
-      "comment": "CTU %C0 counts rising edges of %I1 with preset 5 (%C0.P) and sets its done bit %C0.D at five vehicles.",
+      "comment": "CTU %C0 counts rising edges of %I1 with preset 5 (%C0.P) and sets its done bit %C0.D at five vehicles. R/LD/CU/CD read rows 0-3, so the pulse enters on row 2 (CU) and the unused R/LD/CD rows are tied off with the always-false spare_off bit.",
       "elements": [
-        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 1, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNo", "var": { "kind": "MemBit", "index": 7, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNo", "var": { "kind": "MemBit", "index": 7, "index_expr": null, "accessor": null }, "col": 0, "row": 1, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 1, "index_expr": null, "accessor": null }, "col": 0, "row": 2, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNo", "var": { "kind": "MemBit", "index": 7, "index_expr": null, "accessor": null }, "col": 0, "row": 3, "connected_with_top": false, "params": [] },
         { "kind": { "Counter": { "kind": "Up" } }, "var": { "kind": "Counter", "index": 0, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": ["5"] }
       ]
     },
@@ -62,7 +65,8 @@
     { "name": "stop_button", "var": { "kind": "PhysIn", "index": 2, "index_expr": null, "accessor": null }, "comment": "Stop push-button, wired normally closed", "unit": null },
     { "name": "green_lamp", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null }, "comment": "Traffic light, green aspect", "unit": null },
     { "name": "amber_lamp", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "accessor": null }, "comment": "Traffic light, amber aspect", "unit": null },
-    { "name": "vehicle_count", "var": { "kind": "MemWord", "index": 0, "index_expr": null, "accessor": null }, "comment": "Vehicles seen when the counter reached its preset", "unit": "veh" }
+    { "name": "vehicle_count", "var": { "kind": "MemWord", "index": 0, "index_expr": null, "accessor": null }, "comment": "Vehicles seen when the counter reached its preset", "unit": "veh" },
+    { "name": "spare_off", "var": { "kind": "MemBit", "index": 7, "index_expr": null, "accessor": null }, "comment": "Always false: ties off the unused R/LD/CD rows of the counter", "unit": null }
   ],
   "simulation": {
     "switches": [
