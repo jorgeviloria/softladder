@@ -118,6 +118,7 @@ cargo test --workspace            # unit tests (570+ tests)
 cargo run -p softladder-ui        # desktop editor (run it from the repo root)
 cargo run -p softladder-cli -- run examples/traffic_light.slprj --cycles 500   # deterministic
 cargo run -p softladder-cli -- test examples/traffic_light.slprj examples/traffic_light.sltest
+cargo run -p softladder-cli -- serve examples/traffic_light.slprj --cycles 50   # monitor + dashboard
 cargo run -p softladder-cli -- run examples/traffic_light.slprj --real-time    # wall-clock pacing
 cargo run -p softladder-cli -- lint examples/traffic_light.slprj
 cargo run -p softladder-cli -- import my_project.clprj -o my_project.slprj
