@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — `softladder test` (M8, slice two)
+
+### Added
+
+- **`softladder test <project> <scenario>` for CI.** Loads the pair, runs the timeline and
+  prints one line per failure plus a summary; exit `0` when everything held, `3` on failures,
+  `1` on load errors. Scenario files use the hand-written form (`"%I0"`, `true`, numbers);
+  the structured serde form still decodes. Ships with `examples/traffic_light.sltest`
+  (start/stop seal-in, 5 assertions, green).
+
 ## [Unreleased] — `.sltest` scenarios (M8, slice one)
 
 ### Added

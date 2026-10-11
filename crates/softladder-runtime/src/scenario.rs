@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use softladder_core::{Project, Value, VarRef};
 use thiserror::Error;
 
@@ -39,7 +39,10 @@ pub enum ScenarioError {
 }
 
 /// One input change applied before its cycle's scan.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Files use the friendly form (`"var": "%I0"`, `"value": true`); the
+/// structured serde form of [`VarRef`]/[`Value`] decodes too.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ScenarioStep {
     /// Scan cycle the change applies to, counting from `0`.
     pub cycle: u64,
@@ -49,8 +52,21 @@ pub struct ScenarioStep {
     pub value: Value,
 }
 
+impl<'de> Deserialize<'de> for ScenarioStep {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = StepForm::deserialize(deserializer)?;
+        Ok(ScenarioStep {
+            cycle: raw.cycle(),
+            var: parse_var::<D>(raw.var())?,
+            value: raw.value(),
+        })
+    }
+}
+
 /// One output check performed after its cycle's scan.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// Same friendly file form as [`ScenarioStep`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ScenarioAssert {
     /// Scan cycle checked, counting from `0`.
     pub cycle: u64,
@@ -58,6 +74,138 @@ pub struct ScenarioAssert {
     pub var: VarRef,
     /// Expected value.
     pub expected: Value,
+}
+
+impl<'de> Deserialize<'de> for ScenarioAssert {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = AssertForm::deserialize(deserializer)?;
+        Ok(ScenarioAssert {
+            cycle: raw.cycle(),
+            var: parse_var::<D>(raw.var())?,
+            expected: raw.value(),
+        })
+    }
+}
+
+/// A scalar in a friendly file: boolean, integer or real.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(untagged)]
+enum FriendlyValue {
+    /// A bit.
+    Bool(bool),
+    /// A word when it fits `i32`, a double word otherwise.
+    Int(i64),
+    /// A real.
+    Float(f64),
+}
+
+impl From<FriendlyValue> for Value {
+    fn from(value: FriendlyValue) -> Value {
+        match value {
+            FriendlyValue::Bool(bit) => Value::Bit(bit),
+            FriendlyValue::Int(int) => i32::try_from(int)
+                .map(Value::Word)
+                .unwrap_or(Value::DWord(int)),
+            FriendlyValue::Float(real) => Value::Real(real),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum StepForm {
+    /// Structured serde form.
+    Structured {
+        /// Cycle.
+        cycle: u64,
+        /// Variable.
+        var: VarRef,
+        /// Value.
+        value: Value,
+    },
+    /// Hand-written form.
+    Friendly {
+        /// Cycle.
+        cycle: u64,
+        /// Variable as text, e.g. `"%I0"`.
+        var: String,
+        /// Scalar value.
+        value: FriendlyValue,
+    },
+}
+
+impl StepForm {
+    fn cycle(&self) -> u64 {
+        match self {
+            StepForm::Structured { cycle, .. } | StepForm::Friendly { cycle, .. } => *cycle,
+        }
+    }
+
+    fn value(&self) -> Value {
+        match self {
+            StepForm::Structured { value, .. } => *value,
+            StepForm::Friendly { value, .. } => Value::from(value.clone()),
+        }
+    }
+
+    fn var(&self) -> Result<VarRef, String> {
+        match self {
+            StepForm::Structured { var, .. } => Ok(var.clone()),
+            StepForm::Friendly { var, .. } => var.parse().map_err(|error| format!("{error}")),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum AssertForm {
+    /// Structured serde form.
+    Structured {
+        /// Cycle.
+        cycle: u64,
+        /// Variable.
+        var: VarRef,
+        /// Expected value.
+        expected: Value,
+    },
+    /// Hand-written form.
+    Friendly {
+        /// Cycle.
+        cycle: u64,
+        /// Variable as text.
+        var: String,
+        /// Expected scalar value.
+        expected: FriendlyValue,
+    },
+}
+
+impl AssertForm {
+    fn cycle(&self) -> u64 {
+        match self {
+            AssertForm::Structured { cycle, .. } | AssertForm::Friendly { cycle, .. } => *cycle,
+        }
+    }
+
+    fn value(&self) -> Value {
+        match self {
+            AssertForm::Structured { expected, .. } => *expected,
+            AssertForm::Friendly { expected, .. } => Value::from(expected.clone()),
+        }
+    }
+
+    fn var(&self) -> Result<VarRef, String> {
+        match self {
+            AssertForm::Structured { var, .. } => Ok(var.clone()),
+            AssertForm::Friendly { var, .. } => var.parse().map_err(|error| format!("{error}")),
+        }
+    }
+}
+
+fn parse_var<'de, D: Deserializer<'de>>(
+    parsed: Result<VarRef, String>,
+) -> Result<VarRef, D::Error> {
+    use serde::de::Error;
+    parsed.map_err(D::Error::custom)
 }
 
 /// A `.sltest` scenario: timeline plus assertions.
@@ -312,6 +460,29 @@ mod tests {
             result.failures[0].kind,
             FailureKind::SetupError { .. }
         ));
+    }
+
+    #[test]
+    fn friendly_files_decode_with_scalars() {
+        let json = r#"{
+            "name": "hand-written",
+            "steps": [
+                {"cycle": 0, "var": "%I0", "value": true},
+                {"cycle": 1, "var": "%MW0", "value": 17},
+                {"cycle": 2, "var": "%MW1", "value": 1.5}
+            ],
+            "assertions": [
+                {"cycle": 2, "var": "%Q0", "expected": false}
+            ]
+        }"#;
+        let scenario: Scenario = serde_json::from_str(json).expect("friendly decodes");
+        assert_eq!(scenario.steps[0].value, Value::Bit(true));
+        assert_eq!(scenario.steps[1].value, Value::Word(17));
+        assert_eq!(scenario.steps[2].value, Value::Real(1.5));
+        assert_eq!(scenario.assertions[0].expected, Value::Bit(false));
+
+        let bad = r#"{"name":"bad","steps":[{"cycle":0,"var":"%ZZZ","value":true}]}"#;
+        assert!(serde_json::from_str::<Scenario>(bad).is_err());
     }
 
     #[test]

@@ -1,0 +1,18 @@
+{
+  "name": "traffic light start/stop",
+  "steps": [
+    {"cycle": 0, "var": "%I0", "value": false},
+    {"cycle": 0, "var": "%I2", "value": false},
+    {"cycle": 2, "var": "%I0", "value": true},
+    {"cycle": 3, "var": "%I0", "value": false},
+    {"cycle": 5, "var": "%I2", "value": true},
+    {"cycle": 6, "var": "%I2", "value": false}
+  ],
+  "assertions": [
+    {"cycle": 0, "var": "%Q0", "expected": false},
+    {"cycle": 2, "var": "%Q0", "expected": true},
+    {"cycle": 3, "var": "%Q0", "expected": true},
+    {"cycle": 5, "var": "%Q0", "expected": false},
+    {"cycle": 6, "var": "%Q0", "expected": false}
+  ]
+}

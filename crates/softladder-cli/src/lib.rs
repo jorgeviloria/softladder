@@ -1,6 +1,6 @@
 //! Command line interface for SoftLadder.
 //!
-//! Four subcommands are available:
+//! Five subcommands are available:
 //!
 //! * `run <project>` — loads a project and drives a [`Runtime`] for a number of
 //!   scans. By default the scans use **simulated** time (`now_ms` advances by
@@ -8,15 +8,17 @@
 //!   fast; `--real-time` opts into wall-clock pacing with a sleep.
 //! * `lint <project>` — loads a project, runs one scan and reports every
 //!   diagnostic it can find without executing hardware.
-//! * `import <clprj> -o <slprj>` — ClassicLadder import, scheduled for M3.
-//! * `export <slprj> -o <clprj>` — ClassicLadder export, scheduled for M3.
+//! * `import <clprj> -o <slprj>` — ClassicLadder import.
+//! * `export <slprj> -o <clprj>` — ClassicLadder export.
+//! * `test <project> <scenario>` — runs a `.sltest` input timeline against the
+//!   project and checks its output assertions, for CI.
 //!
 //! Besides the codes documented in `docs/ELEMENTS.md`, `lint` reports the
 //! project-level codes `SL-E010` (duplicate id) and `SL-W010`/`SL-W011` (empty
 //! project / empty rung).
 //!
 //! Exit codes: `0` success, `1` usage or I/O problem, `2` feature not
-//! implemented yet, `3` the project has errors.
+//! implemented yet, `3` the project has errors or a scenario failed.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -31,7 +33,7 @@ use softladder_core::ElementKind;
 use softladder_core::{Diagnostic, Project, ScanEngine, Severity};
 use softladder_io::{IoDriver, IoImage, SimDriver};
 use softladder_project::{classicladder, native};
-use softladder_runtime::{Clock, Runtime};
+use softladder_runtime::{load_scenario, run_scenario, Clock, FailureKind, Runtime};
 
 /// Exit code for a successful command.
 pub const EXIT_OK: i32 = 0;
@@ -67,6 +69,8 @@ pub enum Command {
     Import(ImportArgs),
     /// Export a project to ClassicLadder `.clprj` format.
     Export(ExportArgs),
+    /// Run a `.sltest` scenario against a project.
+    Test(TestArgs),
 }
 
 /// Arguments of `softladder run`.
@@ -117,6 +121,15 @@ pub struct ExportArgs {
     pub output: PathBuf,
 }
 
+/// Arguments of `softladder test`.
+#[derive(Debug, Args)]
+pub struct TestArgs {
+    /// SoftLadder project to run (`.slprj` or `.slprjz`).
+    pub project: PathBuf,
+    /// Scenario to check (`.sltest`).
+    pub scenario: PathBuf,
+}
+
 /// Parses command line arguments without touching the process environment.
 pub fn parse_args<I, T>(args: I) -> Result<Cli, clap::Error>
 where
@@ -133,6 +146,7 @@ pub fn execute(cli: Cli) -> i32 {
         Command::Lint(args) => lint_project(&args),
         Command::Import(args) => import_project(&args),
         Command::Export(args) => export_project(&args),
+        Command::Test(args) => test_project(&args),
     }
 }
 
@@ -304,6 +318,62 @@ fn mirror_outputs(engine: &ScanEngine) -> Vec<usize> {
     (0..digital)
         .filter(|channel| driver.get_output(*channel) == Some(true))
         .collect()
+}
+
+/// Runs the `.sltest` scenario of `args` against its project.
+///
+/// Prints one line per failure plus a summary line; the process exit code is
+/// what CI branches on: `0` when every assertion held, `3` otherwise.
+fn test_project(args: &TestArgs) -> i32 {
+    let project = match native::load(&args.project) {
+        Ok(project) => project,
+        Err(error) => {
+            eprintln!("error: cannot load `{}`: {error}", args.project.display());
+            return EXIT_USAGE;
+        }
+    };
+    let scenario = match load_scenario(&args.scenario) {
+        Ok(scenario) => scenario,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return EXIT_USAGE;
+        }
+    };
+
+    let result = run_scenario(&project, &scenario);
+    for failure in &result.failures {
+        match &failure.kind {
+            FailureKind::SetupError { message } => {
+                println!(
+                    "    cycle {} {}: setup error: {message}",
+                    failure.cycle, failure.var,
+                );
+            }
+            FailureKind::Mismatch { expected, actual } => {
+                let actual = actual
+                    .map(|value| format!("{value:?}"))
+                    .unwrap_or_else(|| "unknown variable".to_owned());
+                println!(
+                    "    cycle {} {}: expected {expected:?}, actual {actual}",
+                    failure.cycle, failure.var,
+                );
+            }
+        }
+    }
+    println!(
+        "test: scenario=\"{}\" project=\"{}\" cycles={} asserted={} failures={}",
+        result.name,
+        args.project.display(),
+        result.cycles,
+        result.asserted,
+        result.failures.len(),
+    );
+
+    if result.passed() {
+        EXIT_OK
+    } else {
+        EXIT_DIAGNOSTICS
+    }
 }
 
 fn lint_project(args: &LintArgs) -> i32 {
@@ -579,6 +649,58 @@ mod tests {
             }
             other => panic!("expected the export subcommand, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_arguments_are_parsed() {
+        let cli = Cli::try_parse_from(["softladder", "test", "project.slprj", "scenario.sltest"])
+            .expect("parses");
+        match cli.command {
+            Command::Test(args) => {
+                assert_eq!(args.project, PathBuf::from("project.slprj"));
+                assert_eq!(args.scenario, PathBuf::from("scenario.sltest"));
+            }
+            other => panic!("expected the test subcommand, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_passes_on_the_traffic_light_example() {
+        let scenario =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/traffic_light.sltest");
+        let code = test_project(&TestArgs {
+            project: example_project(),
+            scenario,
+        });
+        assert_eq!(code, EXIT_OK);
+    }
+
+    #[test]
+    fn test_reports_failures_and_missing_files() {
+        let dir = std::env::temp_dir();
+        let failing = dir.join("softladder-cli-failing.sltest");
+        std::fs::write(
+            &failing,
+            r#"{"name":"bad","steps":[],"assertions":[{"cycle":0,"var":"%Q0","expected":true}]}"#,
+        )
+        .expect("writes");
+        let code = test_project(&TestArgs {
+            project: example_project(),
+            scenario: failing.clone(),
+        });
+        assert_eq!(code, EXIT_DIAGNOSTICS);
+        let _ = std::fs::remove_file(&failing);
+
+        let code = test_project(&TestArgs {
+            project: example_project(),
+            scenario: PathBuf::from("/definitely/not/here.sltest"),
+        });
+        assert_eq!(code, EXIT_USAGE);
+        let code = test_project(&TestArgs {
+            project: PathBuf::from("/definitely/not/here.slprj"),
+            scenario: PathBuf::from("/definitely/not/here.sltest"),
+        });
+        assert_eq!(code, EXIT_USAGE);
     }
 
     #[test]
