@@ -6,9 +6,10 @@
 //! back out after it. Keeping the boundary this narrow means the whole control
 //! program can be tested against [`SimDriver`] with no hardware at all.
 //!
-//! Real drivers are scheduled for later milestones:
+//! Real drivers land across M5–M7:
 //!
-//! * [`modbus`] — Modbus TCP/RTU client and server (M5).
+//! * [`modbus`] — configurable Modbus address map (M5 slice one); the TCP/RTU
+//!   transport with polling, retries and supervision is the next M5 slice.
 //! * [`gpio`] — Linux GPIO character device and Raspberry Pi headers (M5).
 //! * [`hal`] — LinuxCNC-style HAL pins and signals (M7).
 
@@ -22,4 +23,5 @@ pub mod modbus;
 pub mod sim;
 
 pub use image::{IoDriver, IoError, IoImage};
-pub use sim::SimDriver;
+pub use modbus::{AnalogKind, AnalogMap, ModbusMap, WordOrder};
+pub use sim::{ScriptPlayer, SimDriver, SimEvent, SimScript};

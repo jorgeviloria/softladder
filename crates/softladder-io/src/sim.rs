@@ -1,4 +1,4 @@
-//! In-memory simulation driver.
+//! In-memory simulation driver, scriptable from `.sltest` scenarios.
 //!
 //! The simulation driver keeps its own copy of the process image so that tests
 //! (and the editor's "simulate" mode) can drive inputs and observe outputs
@@ -6,6 +6,11 @@
 //! the caller's image and [`IoDriver::write`] copies outputs back in; when the
 //! two images differ in size only the overlapping channels are exchanged, so a
 //! mismatch can never panic.
+//!
+//! A [`SimScript`] is the deterministic input timeline the M8 `.sltest`
+//! harness will run: a sorted list of [`SimEvent`]s keyed by scan cycle.
+//! [`ScriptPlayer`] applies each event exactly once while a run advances,
+//! so the same script and the same program always produce the same outputs.
 
 use crate::image::{IoDriver, IoError, IoImage};
 
@@ -62,6 +67,126 @@ impl SimDriver {
     /// Mutable access to the driver-side image.
     pub fn image_mut(&mut self) -> &mut IoImage {
         &mut self.image
+    }
+
+    /// Applies one scripted event, as the `.sltest` timeline would.
+    ///
+    /// Channels outside the driver image are skipped, following the same
+    /// overlap rule as [`IoDriver::read`]: a script written for a larger PLC
+    /// can never panic a smaller one.
+    pub fn apply_event(&mut self, event: &SimEvent) {
+        for (channel, value) in &event.digital {
+            let _ = self.image.set_digital_input(*channel, *value);
+        }
+        for (channel, value) in &event.analog {
+            let _ = self.image.set_analog_input(*channel, *value);
+        }
+    }
+}
+
+/// One input change at a given scan cycle (0-based).
+///
+/// An event typically carries a single channel, but grouping the channels
+/// that change on the same cycle keeps multi-channel timelines readable.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SimEvent {
+    /// Scan cycle the change applies to, counting from `0`.
+    pub cycle: u64,
+    /// Digital inputs to set: `(channel, value)` pairs.
+    pub digital: Vec<(usize, bool)>,
+    /// Analog inputs to set: `(channel, value)` pairs.
+    pub analog: Vec<(usize, f64)>,
+}
+
+impl SimEvent {
+    /// Creates an event at `cycle` with the given channel changes.
+    pub fn new(cycle: u64, digital: Vec<(usize, bool)>, analog: Vec<(usize, f64)>) -> Self {
+        Self {
+            cycle,
+            digital,
+            analog,
+        }
+    }
+}
+
+/// Deterministic input timeline for a simulated run.
+///
+/// Events are sorted by cycle on construction (stable), so a hand-written
+/// scenario does not need to be ordered. An empty script is the manual
+/// bench: inputs only change through [`SimDriver::set_input`].
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SimScript {
+    events: Vec<SimEvent>,
+}
+
+impl SimScript {
+    /// Creates a script from `events`, sorting them by cycle.
+    pub fn new(mut events: Vec<SimEvent>) -> Self {
+        events.sort_by_key(|event| event.cycle);
+        Self { events }
+    }
+
+    /// Events in the order they run.
+    pub fn events(&self) -> &[SimEvent] {
+        &self.events
+    }
+
+    /// `true` when the script carries no event.
+    pub fn is_empty(&self) -> bool {
+        self.events.is_empty()
+    }
+
+    /// Number of events in the script.
+    pub fn len(&self) -> usize {
+        self.events.len()
+    }
+}
+
+/// Applies a [`SimScript`] to a driver while a run advances.
+///
+/// [`ScriptPlayer::advance`] runs every event with `event.cycle <= cycle`
+/// that has not run yet, in script order, and counts them. Create a new
+/// player (or call [`ScriptPlayer::reset`]) when a run restarts from cycle
+/// `0`; going backwards never re-runs events by itself.
+#[derive(Debug, Clone)]
+pub struct ScriptPlayer {
+    script: SimScript,
+    next: usize,
+}
+
+impl ScriptPlayer {
+    /// Creates a player at the start of `script`.
+    pub fn new(script: SimScript) -> Self {
+        Self { script, next: 0 }
+    }
+
+    /// Script being played.
+    pub fn script(&self) -> &SimScript {
+        &self.script
+    }
+
+    /// Index of the next event to run.
+    pub fn next(&self) -> usize {
+        self.next
+    }
+
+    /// Rewinds to the start of the script.
+    pub fn reset(&mut self) {
+        self.next = 0;
+    }
+
+    /// Applies every pending event with `event.cycle <= cycle`.
+    ///
+    /// Returns how many events ran.
+    pub fn advance(&mut self, driver: &mut SimDriver, cycle: u64) -> usize {
+        let mut applied = 0;
+        while self.next < self.script.events.len() && self.script.events[self.next].cycle <= cycle {
+            let event = self.script.events[self.next].clone();
+            driver.apply_event(&event);
+            self.next += 1;
+            applied += 1;
+        }
+        applied
     }
 }
 
@@ -141,5 +266,66 @@ mod tests {
         assert_eq!(driver.get_output(99), None);
         assert_eq!(driver.image().digital_in.len(), DEFAULT_DIGITAL_CHANNELS);
         assert_eq!(driver.image().analog_in.len(), DEFAULT_ANALOG_CHANNELS);
+    }
+
+    #[test]
+    fn a_script_sorts_events_and_plays_each_exactly_once() {
+        let script = SimScript::new(vec![
+            SimEvent::new(2, vec![(0, false)], vec![]),
+            SimEvent::new(0, vec![(0, true)], vec![(0, 1.5)]),
+            SimEvent::new(1, vec![(1, true)], vec![]),
+        ]);
+        assert_eq!(script.len(), 3);
+        assert!(!script.is_empty());
+        assert_eq!(
+            script
+                .events()
+                .iter()
+                .map(|event| event.cycle)
+                .collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+
+        let mut driver = SimDriver::new(4, 2);
+        let mut player = ScriptPlayer::new(script);
+        assert_eq!(player.next(), 0);
+
+        assert_eq!(player.advance(&mut driver, 0), 1);
+        assert!(driver.image().digital_in[0]);
+        assert_eq!(driver.image().analog_in[0], 1.5);
+        // Replaying the same cycle runs nothing twice.
+        assert_eq!(player.advance(&mut driver, 0), 0);
+
+        assert_eq!(player.advance(&mut driver, 1), 1);
+        assert!(driver.image().digital_in[1]);
+
+        assert_eq!(player.advance(&mut driver, 5), 1);
+        assert!(!driver.image().digital_in[0]);
+        assert_eq!(player.next(), 3);
+    }
+
+    #[test]
+    fn scripted_channels_out_of_range_are_skipped() {
+        let mut driver = SimDriver::new(1, 1);
+        driver.apply_event(&SimEvent::new(
+            0,
+            vec![(0, true), (99, true)],
+            vec![(0, 2.5), (99, 2.5)],
+        ));
+        assert!(driver.image().digital_in[0]);
+        assert_eq!(driver.image().analog_in[0], 2.5);
+    }
+
+    #[test]
+    fn resetting_the_player_replays_the_script() {
+        let script = SimScript::new(vec![SimEvent::new(0, vec![(0, true)], vec![])]);
+        let mut player = ScriptPlayer::new(script);
+        let mut driver = SimDriver::new(2, 0);
+        assert_eq!(player.advance(&mut driver, 0), 1);
+        player.reset();
+        assert_eq!(player.next(), 0);
+        driver.set_input(0, false).expect("channel in range");
+        assert_eq!(player.advance(&mut driver, 0), 1);
+        assert!(driver.image().digital_in[0]);
     }
 }

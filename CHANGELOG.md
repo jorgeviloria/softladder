@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — IO mapping (M5, slice one)
+
+### Added
+
+- **Scriptable simulation driver.** `SimScript` is a deterministic input timeline (scan cycle →
+  channel changes) and `ScriptPlayer` applies each event exactly once while a run advances, so the
+  same script and program always produce the same outputs. Out-of-range channels are skipped, never
+  a panic. This is the timeline the future `.sltest` harness will drive.
+- **Configurable Modbus address map.** `ModbusMap` binds `%I`/`%Q` to coils/discrete inputs from a
+  base address and `%IW`/`%QW` to register runs with kind (`I16`/`U16`/`F32`), scale, offset and
+  word order (`value = raw * scale + offset`, clamped). `ModbusMap::fixed` keeps the ClassicLadder
+  zero-based mirroring as the default. Pure encode/decode helpers, no socket yet: the TCP/RTU
+  transport with polling, retries and supervision is the next slice.
+
 ## [Unreleased] — operator bench (UI/UX U5)
 
 ### Added
