@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Monitor runtime target (M6, slice two)
+
+### Added
+
+- **`MonitorTarget` for the real runtime.** `MonitoredRuntime` wraps `Runtime` with a force map:
+  monitor writes land in the store (and lose to the program on the next scan, like the bench's
+  modify column), forces re-apply before every tick so they hold, and writes to a forced
+  variable are refused until it is released. Alarms still read empty; the journal is next.
+
 ## [Unreleased] — Monitor roles and session (M6, slice one)
 
 ### Added

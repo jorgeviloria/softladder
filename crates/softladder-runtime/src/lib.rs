@@ -12,8 +12,10 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod monitor;
 pub mod recorder;
 pub mod runtime;
 
+pub use monitor::MonitoredRuntime;
 pub use recorder::FlightRecorder;
 pub use runtime::{Clock, Runtime, RuntimeState, ScanStats, ScanSummary};

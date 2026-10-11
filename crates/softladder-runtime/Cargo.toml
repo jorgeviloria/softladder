@@ -9,5 +9,6 @@ repository.workspace = true
 
 [dependencies]
 softladder-core = { path = "../softladder-core" }
+softladder-monitor = { path = "../softladder-monitor" }
 softladder-project = { path = "../softladder-project" }
 thiserror = { workspace = true }
