@@ -32,10 +32,7 @@ same output (add `--real-time` to pace with the wall clock instead):
 
 ```console
 $ cargo run -p softladder-cli -- run examples/traffic_light.slprj --cycles 500
-cycle      1  now=     0ms  state=Run  diagnostics=0
-cycle      2  now=    10ms  state=Run  diagnostics=0
-…
-summary: cycles=500 period=10ms simulated=true max_scan_ms=0.012 missed=0 diagnostics=0
+summary: mode=simulated cycles=500 period_ms=10 missed=0 diagnostics=0
 ```
 
 The 3000 ms timer above therefore fires after 300 simulated scans, without waiting
@@ -47,6 +44,43 @@ because the run is simulated, the JSON of two identical invocations is byte-iden
 ```console
 $ cargo run -p softladder-cli -- lint examples/traffic_light.slprj
 examples/traffic_light.slprj: 0 diagnostic(s), 0 error(s)
+```
+
+### Test it
+
+`test` runs a `.sltest` scenario — an input timeline plus output assertions keyed
+by scan cycle — and reports one line per failure plus a summary. The exit code is
+what CI branches on (`0` green, `3` failures, `1` load errors):
+
+```console
+$ cargo run -p softladder-cli -- test examples/traffic_light.slprj examples/traffic_light.sltest
+test: scenario="traffic light start/stop" project="examples/traffic_light.slprj" cycles=6 asserted=5 failures=0
+```
+
+Scenarios are hand-written JSON: variables as text (`"%I0"`), values as scalars
+(`true`, `17`, `1.5`). Steps apply before their cycle's scan, assertions check
+after it. See `traffic_light.sltest` (start/stop seal-in) for the shape.
+
+### Serve it
+
+`serve` scans on a wall-clock period while exposing the runtime twice: the monitor
+TCP protocol and the dashboard HTTP page, both against the same program:
+
+```console
+$ cargo run -p softladder-cli -- serve examples/traffic_light.slprj --cycles 50
+serve: monitor=127.0.0.1:4840 dashboard=127.0.0.1:8080 cycles=50 period_ms=10
+serve: done cycles=50 monitor_connections=0 http_requests=0
+```
+
+Every connection speaks one JSON request per line after a `{"token":"…"}` line
+(`viewer` reads, `operator` writes, `engineer` forces); bearers pass as repeated
+`--token id=role`, defaulting to a local engineer bearer with a warning. The
+dashboard polls `/api/status`, `/api/vars` and `/api/alarms` and posts to
+`/api/set`, `/api/force`, `/api/release` and `/api/ack`:
+
+```console
+$ curl -s "http://127.0.0.1:8080/api/vars?token=local&var=%25Q0"
+{"values":[{"value":{"Bit":false},"var":"%Q0"}]}
 ```
 
 ### Open it in the editor
@@ -61,16 +95,19 @@ with an empty project instead.
 
 ### Importing or exporting ClassicLadder projects
 
-`import` and `export` parse and write the ClassicLadder text container today,
-but the element-level mapping is a stub that reports `M3`:
+`import` and `export` convert the ClassicLadder text container (parts, variables,
+rungs, sections and sequential charts), validated against all 41 upstream example
+projects — see [`docs/COMPAT.md`](../docs/COMPAT.md):
 
 ```console
 $ cargo run -p softladder-cli -- import my_project.clprj -o my_project.slprj
-error: importing ClassicLadder projects is not implemented yet (planned for M3)…
+$ cargo run -p softladder-cli -- export my_project.slprj -o my_project_back.clprj
 ```
 
 `scripts/fetch_corpus.sh` downloads the ClassicLadder sources and example
-projects that the M3 compatibility tests will use.
+projects that the M3 compatibility tests run against (they skip when the corpus
+is missing). Behavioural differences that remain are listed in
+[`testdata/known-divergences.md`](../testdata/known-divergences.md).
 
 ## Writing your own
 
