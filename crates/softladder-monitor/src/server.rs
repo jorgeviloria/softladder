@@ -217,6 +217,10 @@ mod tests {
         fn alarms(&self) -> Vec<Alarm> {
             Vec::new()
         }
+
+        fn acknowledge(&mut self, _id: u64, _by: &str) -> bool {
+            false
+        }
     }
 
     fn tokens() -> HashMap<String, Token> {

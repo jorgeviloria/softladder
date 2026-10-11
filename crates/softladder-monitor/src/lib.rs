@@ -29,9 +29,11 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod alarms;
 pub mod server;
 pub mod session;
 
+pub use alarms::{AlarmJournal, JournalEntry};
 pub use server::{serve, serve_stream, ServerConfig};
 pub use session::{AuditAction, AuditEntry, MonitorTarget, Role, Session, TargetError, Token};
 pub use softladder_core::{Value, VarRef};
@@ -68,6 +70,11 @@ pub enum Request {
     },
     /// Ask for the currently active alarms.
     GetAlarms,
+    /// Acknowledge an alarm by journal id (attributed to the bearer).
+    AckAlarm {
+        /// Journal id to acknowledge.
+        id: u64,
+    },
 }
 
 /// Response sent by the SoftLadder runtime back to a monitoring client.
@@ -115,6 +122,10 @@ pub struct Alarm {
     pub message: String,
     /// Variable the alarm refers to, when it is variable specific.
     pub var: Option<VarRef>,
+    /// Whether anyone acknowledged it (`false` when the sender does not track
+    /// acknowledgement; missing in older payloads).
+    #[serde(default)]
+    pub acked: bool,
 }
 
 #[cfg(test)]
@@ -142,6 +153,7 @@ mod tests {
             },
             Request::ReleaseVar { var: var("%Q0") },
             Request::GetAlarms,
+            Request::AckAlarm { id: 3 },
         ];
         for request in requests {
             let json = serde_json::to_string(&request).expect("serializes");
@@ -168,6 +180,7 @@ mod tests {
                     code: "SL-E002".to_owned(),
                     message: "division by zero".to_owned(),
                     var: Some(var("%MW0")),
+                    acked: true,
                 }],
             },
             Response::Ok,

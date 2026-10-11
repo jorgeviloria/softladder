@@ -1,31 +1,34 @@
-//! [`MonitorTarget`](softladder_monitor::MonitorTarget) for the runtime — **M6 slice two**.
+//! [`MonitorTarget`](softladder_monitor::MonitorTarget) for the runtime — **M6 slices two and four**.
 //!
-//! [`MonitoredRuntime`] wraps a [`Runtime`] with a force map: monitor writes
-//! go straight to the store (and lose to the program on the next scan, exactly
-//! like the bench's modify column), while forces are re-applied before every
-//! [`MonitoredRuntime::tick`] so they hold while the program runs. Alarms still
-//! read empty: the journal is a later M6 slice.
+//! [`MonitoredRuntime`] wraps a [`Runtime`] with a force map and an alarm
+//! journal: monitor writes go straight to the store (and lose to the program
+//! on the next scan, exactly like the bench's modify column), while forces are
+//! re-applied before every [`MonitoredRuntime::tick`] so they hold while the
+//! program runs. Each scan's diagnostics are raised into the journal, so
+//! `GetAlarms` reports what the engine actually saw.
 
 use std::collections::HashMap;
 
-use softladder_core::{Project, ScanReport, Value, VarRef};
-use softladder_monitor::{Alarm, MonitorTarget, TargetError};
+use softladder_core::{Project, ScanReport, Severity, Value, VarRef};
+use softladder_monitor::{Alarm, AlarmJournal, MonitorTarget, TargetError};
 
 use crate::runtime::{Runtime, RuntimeState};
 
-/// A [`Runtime`] driven through the monitor protocol, with a force map.
+/// A [`Runtime`] driven through the monitor protocol, with forces and alarms.
 #[derive(Debug, Clone)]
 pub struct MonitoredRuntime {
     runtime: Runtime,
     forces: HashMap<VarRef, Value>,
+    journal: AlarmJournal,
 }
 
 impl MonitoredRuntime {
-    /// Creates a stopped runtime for `project` with no forces installed.
+    /// Creates a stopped runtime for `project` with no forces and no alarms.
     pub fn new(project: Project) -> Self {
         Self {
             runtime: Runtime::new(project),
             forces: HashMap::new(),
+            journal: AlarmJournal::new(),
         }
     }
 
@@ -42,6 +45,11 @@ impl MonitoredRuntime {
     /// Installed forces, by variable.
     pub fn forces(&self) -> &HashMap<VarRef, Value> {
         &self.forces
+    }
+
+    /// Alarm journal fed by every scan.
+    pub fn journal(&self) -> &AlarmJournal {
+        &self.journal
     }
 
     /// Puts the runtime in [`RuntimeState::Run`].
@@ -67,12 +75,42 @@ impl MonitoredRuntime {
     /// Runs at most one scan at simulated time `now_ms`.
     ///
     /// Forces are written to the store first, so a forced output holds while
-    /// the program runs. Returns [`None`] when the state does not scan.
+    /// the program runs; afterwards the scan diagnostics are raised into the
+    /// journal. Returns [`None`] when the state does not scan.
     pub fn tick(&mut self, now_ms: u64) -> Option<ScanReport> {
         for (var, value) in &self.forces {
             let _ = self.runtime.engine.store_mut().set(var, *value);
         }
-        self.runtime.tick(now_ms)
+        let report = self.runtime.tick(now_ms)?;
+        for diagnostic in &report.diagnostics {
+            let severity = match diagnostic.severity {
+                Severity::Info => "info",
+                Severity::Warning => "warning",
+                Severity::Error => "error",
+            }
+            .to_owned();
+            let mut message = diagnostic.message.clone();
+            match (diagnostic.section, diagnostic.rung) {
+                (Some(section), Some(rung)) => {
+                    message.push_str(&format!(" (section {section}, rung {rung})"));
+                }
+                (Some(section), None) => {
+                    message.push_str(&format!(" (section {section})"));
+                }
+                _ => {}
+            }
+            self.journal.raise(
+                Alarm {
+                    severity,
+                    code: diagnostic.code.to_owned(),
+                    message,
+                    var: None,
+                    acked: false,
+                },
+                now_ms,
+            );
+        }
+        Some(report)
     }
 
     fn deny_forced(&self, var: &VarRef) -> Option<TargetError> {
@@ -136,7 +174,15 @@ impl MonitorTarget for MonitoredRuntime {
     }
 
     fn alarms(&self) -> Vec<Alarm> {
-        Vec::new()
+        self.journal
+            .active()
+            .into_iter()
+            .map(|entry| entry.alarm)
+            .collect()
+    }
+
+    fn acknowledge(&mut self, id: u64, by: &str) -> bool {
+        self.journal.acknowledge(id, by)
     }
 }
 
@@ -167,6 +213,18 @@ mod tests {
 
     fn engineer() -> Token {
         Token::new("e-1".to_owned(), Role::Engineer)
+    }
+
+    fn jump_nowhere_project() -> Project {
+        let mut project = Project::new("alarm test");
+        let mut section = Section::new(1, "Main");
+        section.rungs.push(1);
+        project.sections.push(section);
+        project.rungs.push(Rung {
+            elements: vec![PlacedElement::with_params(ElementKind::CoilJump, 0, 0, &[])],
+            ..Rung::new(1)
+        });
+        project
     }
 
     #[test]
@@ -243,6 +301,35 @@ mod tests {
             Err(error) => assert_eq!(error.code, "forced"),
             Ok(_) => panic!("a forced write must fail"),
         }
+    }
+
+    #[test]
+    fn scan_diagnostics_raise_alarms_that_acknowledge() {
+        let mut session = Session::new(engineer(), MonitoredRuntime::new(jump_nowhere_project()));
+        session.target_mut().start();
+        session.target_mut().tick(0);
+        session.target_mut().tick(10);
+
+        // One active alarm: the repeat occurrence refreshes instead of duplicating.
+        let alarms = session.target().journal().active();
+        assert_eq!(alarms.len(), 1);
+        assert_eq!(alarms[0].alarm.code, "SL-E004");
+        assert_eq!(alarms[0].alarm.severity, "error");
+        assert!(!alarms[0].acked());
+        let id = alarms[0].id;
+
+        match session.handle(Request::GetAlarms) {
+            Response::Alarms { alarms } => assert_eq!(alarms.len(), 1),
+            other => panic!("expected alarms, got {other:?}"),
+        }
+        assert_eq!(session.handle(Request::AckAlarm { id }), Response::Ok);
+        assert!(session.target().journal().get(id).expect("present").acked());
+        match session.handle(Request::AckAlarm { id: 999 }) {
+            Response::Error { code, .. } => assert_eq!(code, "unknown_alarm"),
+            other => panic!("expected unknown_alarm, got {other:?}"),
+        }
+        // Two ticks raised once; the audit holds only the ack (ticks are not requests).
+        assert_eq!(session.audit().len(), 0);
     }
 
     #[test]

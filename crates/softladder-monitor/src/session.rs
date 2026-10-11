@@ -33,7 +33,9 @@ impl Role {
     pub fn permits(self, request: &Request) -> bool {
         match request {
             Request::GetStatus | Request::GetVars { .. } | Request::GetAlarms => true,
-            Request::SetVar { .. } | Request::ReleaseVar { .. } => self != Role::Viewer,
+            Request::SetVar { .. } | Request::ReleaseVar { .. } | Request::AckAlarm { .. } => {
+                self != Role::Viewer
+            }
             Request::ForceVar { .. } => self == Role::Engineer,
         }
     }
@@ -116,6 +118,8 @@ pub trait MonitorTarget {
     fn release(&mut self, var: &VarRef) -> bool;
     /// Active alarms, most severe first.
     fn alarms(&self) -> Vec<Alarm>;
+    /// Acknowledges an alarm as `by`; returns `false` when the id is unknown.
+    fn acknowledge(&mut self, id: u64, by: &str) -> bool;
 }
 
 /// Forwards to the borrowed target, so servers can share one target across
@@ -143,6 +147,10 @@ impl<T: MonitorTarget> MonitorTarget for &mut T {
 
     fn alarms(&self) -> Vec<Alarm> {
         (**self).alarms()
+    }
+
+    fn acknowledge(&mut self, id: u64, by: &str) -> bool {
+        (**self).acknowledge(id, by)
     }
 }
 
@@ -176,8 +184,9 @@ pub struct AuditEntry {
 /// An authenticated conversation with a [`MonitorTarget`].
 ///
 /// [`Session::handle`] checks the token role first: refused calls answer
-/// `unauthorized` and never reach the target. Served mutations append one
-/// [`AuditEntry`] each, in call order.
+/// `unauthorized` and never reach the target. Served variable mutations append
+/// one [`AuditEntry`] each, in call order; alarm acknowledgements are
+/// attributed in the journal itself (`acked_by`).
 #[derive(Debug)]
 pub struct Session<T> {
     token: Token,
@@ -269,6 +278,16 @@ impl<T: MonitorTarget> Session<T> {
             Request::GetAlarms => Response::Alarms {
                 alarms: self.target.alarms(),
             },
+            Request::AckAlarm { id } => {
+                if self.target.acknowledge(id, &self.token.id) {
+                    Response::Ok
+                } else {
+                    Response::Error {
+                        code: "unknown_alarm".to_owned(),
+                        message: format!("no active alarm with id {id}"),
+                    }
+                }
+            }
         }
     }
 
@@ -291,6 +310,7 @@ fn request_name(request: &Request) -> &'static str {
         Request::ForceVar { .. } => "force_var",
         Request::ReleaseVar { .. } => "release_var",
         Request::GetAlarms => "get_alarms",
+        Request::AckAlarm { .. } => "ack_alarm",
     }
 }
 
@@ -311,6 +331,7 @@ mod tests {
         writes: usize,
         forces_set: usize,
         releases: usize,
+        journal: crate::alarms::AlarmJournal,
     }
 
     impl MonitorTarget for MockTarget {
@@ -347,7 +368,15 @@ mod tests {
         }
 
         fn alarms(&self) -> Vec<Alarm> {
-            Vec::new()
+            self.journal
+                .active()
+                .into_iter()
+                .map(|entry| entry.alarm)
+                .collect()
+        }
+
+        fn acknowledge(&mut self, id: u64, by: &str) -> bool {
+            self.journal.acknowledge(id, by)
         }
     }
 
@@ -375,6 +404,7 @@ mod tests {
                 Request::ReleaseVar { var: var.clone() },
                 role != Role::Viewer,
             ),
+            (Request::AckAlarm { id: 0 }, role != Role::Viewer),
             (Request::ForceVar { var, value }, role == Role::Engineer),
         ]
     }
