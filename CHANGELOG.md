@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Input fuzzing (M8, slice four)
+
+### Added
+
+- **No-panic fuzzing over every input format.** Proptest suites feed arbitrary text and bytes
+  to the expression parser, `VarRef`, the native `.slprj` loader and the whole ClassicLadder
+  pipeline (`import_bytes`), plus hostile fragments (index tricks, truncated gzip, split
+  terminators). Parsed expressions also display, re-parse to the same tree and evaluate on an
+  empty store without panicking. Coverage-guided libFuzzer targets stay future (nightly-only).
+
 ## [Unreleased] — Incident replay (M8, slice three)
 
 ### Added
