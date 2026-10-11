@@ -14,11 +14,13 @@
 
 pub mod monitor;
 pub mod recorder;
+pub mod replay;
 pub mod runtime;
 pub mod scenario;
 
 pub use monitor::MonitoredRuntime;
 pub use recorder::FlightRecorder;
+pub use replay::{record, replay, RecordedCycle, Recording, ReplayMismatch, ReplayReport};
 pub use runtime::{Clock, Runtime, RuntimeState, ScanStats, ScanSummary};
 pub use scenario::{
     load_scenario, run_scenario, FailureKind, Scenario, ScenarioAssert, ScenarioError,

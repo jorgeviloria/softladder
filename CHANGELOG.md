@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Incident replay (M8, slice three)
+
+### Added
+
+- **Record and exactly replay a run.** `record` drives a scenario and samples watched outputs
+  per scan; `replay` re-applies the recorded inputs and reports every divergence with cycle,
+  variable, expected and actual. Identical projects replay clean; a rewired rung diverges on
+  its first affected cycle. JSON round-trips, so a recording is emailable evidence.
+
 ## [Unreleased] — `softladder test` (M8, slice two)
 
 ### Added
