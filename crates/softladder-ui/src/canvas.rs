@@ -216,7 +216,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
     }
 
     let space = ui.input(|input| input.key_down(egui::Key::Space));
-    handle_zoom(app, ui, &response, paper);
+    handle_wheel(app, ui, &response, paper);
     handle_pan(app, &response, space);
     let view = View::new(paper, app.camera);
     // Where each network's grid landed on screen this frame, so a test (or an
@@ -988,7 +988,14 @@ fn paint_ghost(
         ElementKind::ContactFalling => symbols::contact_falling(painter, glyph, style),
         ElementKind::Connection => symbols::wire(painter, glyph, style),
         ElementKind::Timer { .. } | ElementKind::Counter { .. } | ElementKind::Register { .. } => {
-            symbols::block(painter, glyph, style, describe(kind), &block_pins(kind))
+            symbols::block(
+                painter,
+                glyph,
+                style,
+                describe(kind),
+                &block_pins(kind),
+                block_readouts(kind),
+            )
         }
         ElementKind::Compare | ElementKind::Operate => {
             symbols::expression_box(painter, glyph, style, "%MW0 = 0")
@@ -1214,6 +1221,7 @@ fn paint_element(
                 style,
                 describe(element.kind),
                 &block_pins(element.kind),
+                block_readouts(element.kind),
             );
             if frame.live {
                 if let Some(value) = block_value_text(frame, element) {
@@ -1457,28 +1465,42 @@ fn is_block(kind: ElementKind) -> bool {
     )
 }
 
-/// The pins of a function block: its **inputs** on the left, its readouts on the
-/// right.
+/// The wire pins of a function block: its **inputs** on the left, its single
+/// flow-out on the right, sitting on the first input's row.
 ///
 /// The inputs are not listed here — they are [`ElementKind::input_pins`], the
 /// same table the engine takes its block span from. That is the point: a pin is
-/// only drawn where the engine actually reads a wire, so the drawing can never
-/// advertise a connection that does nothing. A timer therefore shows a single
-/// input (`IN`); its preset is a *parameter* (`%TM0.P`), drawn as a parameter by
-/// [`block_parameter_text`] rather than as a pin.
+/// only drawn where the engine actually reads or writes a wire, so the drawing
+/// can never advertise a connection that does nothing. A timer therefore shows
+/// a single input (`IN`); its preset is a *parameter* (`%TM0.P`), drawn as a
+/// parameter by [`block_parameter_text`] rather than as a pin. The flow-out is
+/// the block's own variable (`Q`, or `E` for a register), which is what the
+/// rung continues with on the first row.
 fn block_pins(kind: ElementKind) -> Vec<(&'static str, i32)> {
     let mut pins: Vec<(&'static str, i32)> =
         kind.input_pins().iter().map(|label| (*label, -1)).collect();
-    pins.extend(block_readouts(kind).iter().map(|label| (*label, 1)));
+    if let Some(flow) = block_flow_output(kind) {
+        pins.push((flow, 1));
+    }
     pins
 }
 
-/// The labels drawn on the right of a block: the flow out and its readouts.
+/// The flow-out of a block: the variable the rung continues with.
+fn block_flow_output(kind: ElementKind) -> Option<&'static str> {
+    match kind {
+        ElementKind::Timer { .. } | ElementKind::Counter { .. } => Some("Q"),
+        ElementKind::Register { .. } => Some("E"),
+        _ => None,
+    }
+}
+
+/// The labels drawn on the right of a block with no stub: live readouts that
+/// are read as variables (`%TM0.V`, `%C0.V`), never wired.
 fn block_readouts(kind: ElementKind) -> &'static [&'static str] {
     match kind {
-        ElementKind::Timer { .. } => &["Q", "ET"],
-        ElementKind::Counter { .. } => &["Q", "CV"],
-        ElementKind::Register { .. } => &["E", "F"],
+        ElementKind::Timer { .. } => &["ET"],
+        ElementKind::Counter { .. } => &["CV"],
+        ElementKind::Register { .. } => &["F"],
         _ => &[],
     }
 }
@@ -2138,12 +2160,36 @@ fn handle_pan(app: &mut EditorApp, response: &egui::Response, space: bool) {
     }
 }
 
-/// Zooms around the pointer with the wheel.
-fn handle_zoom(app: &mut EditorApp, ui: &egui::Ui, response: &egui::Response, paper: Rect) {
+/// Scrolls between networks with the wheel, zooms around the pointer with
+/// `Ctrl/Cmd` held.
+///
+/// The plain wheel pans vertically (sideways with `Shift`), like a document:
+/// zooming on every wheel tick made the ladder unpleasant to read, so the zoom
+/// now lives behind the modifier, the ribbon buttons and the shortcuts.
+fn handle_wheel(app: &mut EditorApp, ui: &egui::Ui, response: &egui::Response, paper: Rect) {
     if !response.hovered() {
         return;
     }
-    let scroll = ui.input(|input| input.raw_scroll_delta.y);
+    let (delta, zoom, sideways) = ui.input(|input| {
+        (
+            input.raw_scroll_delta,
+            input.modifiers.ctrl || input.modifiers.command,
+            input.modifiers.shift,
+        )
+    });
+    if delta == Vec2::ZERO {
+        return;
+    }
+    if !zoom {
+        let sideways = if sideways {
+            Vec2::new(delta.y, 0.0)
+        } else {
+            Vec2::new(delta.x, delta.y)
+        };
+        app.camera.pan_by(sideways);
+        return;
+    }
+    let scroll = delta.y;
     if scroll == 0.0 {
         return;
     }
@@ -2614,7 +2660,60 @@ mod tests {
             !pins.contains(&("PT", -1)),
             "the preset is a parameter, not a wire"
         );
-        assert!(pins.contains(&("ET", 1)), "the elapsed time is a readout");
+    }
+
+    /// The user's report: only the flow-out gets a stub on the right, sitting
+    /// on the first row's wire, while the readouts are labels with no stub —
+    /// `ET`/`CV`/`F` are read as variables and can never be wired.
+    #[test]
+    fn only_the_flow_out_is_wirable_on_the_right() {
+        for (kind, flow, readout) in [
+            (
+                ElementKind::Timer {
+                    mode: TimerMode::On,
+                },
+                "Q",
+                "ET",
+            ),
+            (
+                ElementKind::Counter {
+                    kind: CounterKind::Up,
+                },
+                "Q",
+                "CV",
+            ),
+            (
+                ElementKind::Register {
+                    mode: RegisterMode::Fifo,
+                },
+                "E",
+                "F",
+            ),
+        ] {
+            let pins = block_pins(kind);
+            let outputs: Vec<&str> = pins
+                .iter()
+                .filter(|(_, side)| *side >= 0)
+                .map(|(label, _)| *label)
+                .collect();
+            assert_eq!(outputs, [flow], "{kind:?} has one wirable output");
+            assert_eq!(
+                block_flow_output(kind),
+                Some(flow),
+                "{kind:?} continues the rung with {flow}"
+            );
+            assert_eq!(
+                block_readouts(kind),
+                [readout],
+                "{kind:?} keeps {readout} as a stub-less readout"
+            );
+            assert!(
+                !block_readouts(kind).contains(&flow),
+                "the flow-out is a wire, not a readout"
+            );
+        }
+        assert_eq!(block_flow_output(ElementKind::ContactNo), None);
+        assert!(block_readouts(ElementKind::ContactNo).is_empty());
     }
 
     /// Every pin drawn on the left must be a row the engine reads, or the canvas

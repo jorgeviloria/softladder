@@ -449,7 +449,7 @@ fn document(app: &mut EditorApp, ui: &mut Ui, state: &mut View) {
     }
 
     let space = ui.input(|input| input.key_down(egui::Key::Space));
-    handle_zoom(app, ui, &response, paper);
+    handle_wheel(app, ui, &response, paper);
     handle_pan(app, &response, space);
     let transform = ViewTransform::new(paper, app.camera);
 
@@ -2112,12 +2112,32 @@ fn handle_pan(app: &mut EditorApp, response: &egui::Response, space: bool) {
     }
 }
 
-/// Zooms around the pointer with the wheel.
-fn handle_zoom(app: &mut EditorApp, ui: &Ui, response: &egui::Response, paper: Rect) {
+/// Scrolls between pages with the wheel, zooms around the pointer with
+/// `Ctrl/Cmd` held — the same gesture language as the ladder document.
+fn handle_wheel(app: &mut EditorApp, ui: &Ui, response: &egui::Response, paper: Rect) {
     if !response.hovered() {
         return;
     }
-    let scroll = ui.input(|input| input.raw_scroll_delta.y);
+    let (delta, zoom, sideways) = ui.input(|input| {
+        (
+            input.raw_scroll_delta,
+            input.modifiers.ctrl || input.modifiers.command,
+            input.modifiers.shift,
+        )
+    });
+    if delta == Vec2::ZERO {
+        return;
+    }
+    if !zoom {
+        let sideways = if sideways {
+            Vec2::new(delta.y, 0.0)
+        } else {
+            Vec2::new(delta.x, delta.y)
+        };
+        app.camera.pan_by(sideways);
+        return;
+    }
+    let scroll = delta.y;
     if scroll == 0.0 {
         return;
     }

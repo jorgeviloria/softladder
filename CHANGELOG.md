@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — ladder scroll and honest block pins
+
+### Changed
+
+- **The wheel scrolls.** Rolling the wheel moves between networks (`Shift` + wheel goes
+  sideways) instead of zooming; the zoom lives behind `Ctrl/Cmd` + wheel, the ribbon buttons
+  and the shortcuts. Same gesture language on the SFC document.
+- **A block shows only its real connections.** The flow-out (`Q`, or `E` for a register) keeps
+  the single stub on the right, now sitting on the first row's wire where the rung continues;
+  the readouts (`ET`, `CV`, `F`) stay as labels with no stub, since they are read as variables
+  and can never be wired.
+
 ## [Unreleased] — Input fuzzing (M8, slice four)
 
 ### Added

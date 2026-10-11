@@ -74,6 +74,8 @@ the project before inventing new ones.
 | Arrows | Move the selection one cell |
 | `Ctrl/Cmd + =` / `Ctrl/Cmd + -` | Zoom in / out |
 | `Ctrl/Cmd + 0` | Reset the view |
+| Wheel | Scroll between networks (`Shift` + wheel goes sideways) |
+| `Ctrl/Cmd` + wheel | Zoom around the pointer |
 | `F1` | Shortcut help |
 | `V` | Toggle the selected cell's vertical link |
 

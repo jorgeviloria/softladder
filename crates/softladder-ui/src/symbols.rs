@@ -305,8 +305,19 @@ const BLOCK_BODY: f32 = 1.0 - BLOCK_TOP - BLOCK_BOTTOM;
 
 /// A function block: the type inside the box, named pins on both sides.
 ///
-/// `pins` are `(label, side)` pairs, `side` negative for an input.
-pub fn block(painter: &Painter, rect: Rect, style: Style, title: &str, pins: &[(&str, i32)]) {
+/// `pins` are `(label, side)` pairs, `side` negative for an input. Exactly the
+/// inputs and the single flow-out pin get wire stubs; the flow-out sits on the
+/// first input's row because that is where a block writes its output (see
+/// `queries::power_map`). `readouts` are value labels (`ET`, `CV`) drawn on
+/// the right with no stub: they are read as variables, never wired.
+pub fn block(
+    painter: &Painter,
+    rect: Rect,
+    style: Style,
+    title: &str,
+    pins: &[(&str, i32)],
+    readouts: &[&str],
+) {
     let body = block_body(rect);
     painter.rect(
         body,
@@ -315,16 +326,14 @@ pub fn block(painter: &Painter, rect: Rect, style: Style, title: &str, pins: &[(
         style.symbol,
         egui::StrokeKind::Middle,
     );
-    painter.hline(
-        rect.x_range().min..=body.left(),
-        rect.center().y,
-        style.wire,
-    );
-    painter.hline(
-        body.right()..=rect.x_range().max,
-        rect.center().y,
-        style.wire,
-    );
+    let inputs: Vec<&str> = pins
+        .iter()
+        .filter(|(_, side)| *side < 0)
+        .map(|(label, _)| *label)
+        .collect();
+    let flow_y = body.top() + body.height() * slot(inputs.len(), 0);
+    painter.hline(rect.x_range().min..=body.left(), flow_y, style.wire);
+    painter.hline(body.right()..=rect.x_range().max, flow_y, style.wire);
     painter.text(
         body.center(),
         Align2::CENTER_CENTER,
@@ -336,24 +345,10 @@ pub fn block(painter: &Painter, rect: Rect, style: Style, title: &str, pins: &[(
         style.text,
     );
 
-    let inputs: Vec<&str> = pins
-        .iter()
-        .filter(|(_, side)| *side < 0)
-        .map(|(label, _)| *label)
-        .collect();
-    let outputs: Vec<&str> = pins
-        .iter()
-        .filter(|(_, side)| *side >= 0)
-        .map(|(label, _)| *label)
-        .collect();
     let font = FontId::new(
         (rect.height() * 0.20).clamp(6.0, 10.0),
         FontFamily::Proportional,
     );
-    let slot = |count: usize, index: usize| -> f32 {
-        let count = count.max(1) as f32;
-        (index as f32 + 0.5) / count
-    };
     for (index, label) in inputs.iter().enumerate() {
         let pin_y = body.top() + body.height() * slot(inputs.len(), index);
         painter.hline(
@@ -369,13 +364,29 @@ pub fn block(painter: &Painter, rect: Rect, style: Style, title: &str, pins: &[(
             style.text.gamma_multiply(0.85),
         );
     }
-    for (index, label) in outputs.iter().enumerate() {
-        let pin_y = body.top() + body.height() * slot(outputs.len(), index);
+    // The flow-out shares the first input's row; anything else on the right
+    // is a readout label, drawn where the old spread put it but with no stub.
+    let outputs: Vec<&str> = pins
+        .iter()
+        .filter(|(_, side)| *side >= 0)
+        .map(|(label, _)| *label)
+        .collect();
+    if let Some(label) = outputs.first() {
         painter.hline(
             body.right()..=(body.right() + rect.width() * 0.08),
-            pin_y,
+            flow_y,
             style.wire,
         );
+        painter.text(
+            Pos2::new(body.right() - 3.0, flow_y - 1.0),
+            Align2::RIGHT_BOTTOM,
+            *label,
+            font.clone(),
+            style.text.gamma_multiply(0.85),
+        );
+    }
+    for (index, label) in readouts.iter().enumerate() {
+        let pin_y = body.top() + body.height() * slot(1 + readouts.len(), index + 1);
         painter.text(
             Pos2::new(body.right() - 3.0, pin_y - 1.0),
             Align2::RIGHT_BOTTOM,
@@ -384,6 +395,12 @@ pub fn block(painter: &Painter, rect: Rect, style: Style, title: &str, pins: &[(
             style.text.gamma_multiply(0.85),
         );
     }
+}
+
+/// The fraction down a body where pin `index` of `count` sits.
+fn slot(count: usize, index: usize) -> f32 {
+    let count = count.max(1) as f32;
+    (index as f32 + 0.5) / count
 }
 
 /// The live value of a function block, drawn inside its body under the type.
@@ -486,10 +503,14 @@ pub fn element_glyph(painter: &Painter, rect: Rect, tokens: &Tokens, kind: Eleme
         ElementKind::ContactRising => contact_rising(painter, rect, style),
         ElementKind::ContactFalling => contact_falling(painter, rect, style),
         ElementKind::Connection => wire(painter, rect, style),
-        ElementKind::Timer { .. } => block(painter, rect, style, "TON", &[("IN", -1), ("Q", 1)]),
-        ElementKind::Counter { .. } => block(painter, rect, style, "CTU", &[("CU", -1), ("Q", 1)]),
+        ElementKind::Timer { .. } => {
+            block(painter, rect, style, "TON", &[("IN", -1), ("Q", 1)], &[])
+        }
+        ElementKind::Counter { .. } => {
+            block(painter, rect, style, "CTU", &[("CU", -1), ("Q", 1)], &[])
+        }
         ElementKind::Register { .. } => {
-            block(painter, rect, style, "FIFO", &[("IN", -1), ("E", 1)])
+            block(painter, rect, style, "FIFO", &[("IN", -1), ("E", 1)], &[])
         }
         ElementKind::Compare => expression_box(painter, rect, style, "a = b"),
         ElementKind::Operate => expression_box(painter, rect, style, "a := b"),
