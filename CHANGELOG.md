@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Modbus RTU framing (M5, slice three)
+
+### Added
+
+- **RTU framing over the same PDU, pure and dependency-free.** CRC-16/Modbus plus request,
+  response and exception codecs (`[unit | PDU | CRC-lo | CRC-hi]`) that reuse the TCP PDU codec,
+  so both transports agree on every function code by construction. The serial line itself
+  (device, baud rate, inter-frame silence) waits for hardware; `SlaveStore::handle` already
+  answers the decoded requests.
+
 ## [Unreleased] — Modbus TCP (M5, slice two)
 
 ### Added

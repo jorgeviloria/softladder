@@ -19,14 +19,15 @@ use thiserror::Error;
 /// Default Modbus TCP port.
 pub const DEFAULT_PORT: u16 = 502;
 
-/// Failure of a Modbus TCP exchange.
+/// Failure of a Modbus TCP exchange (also reused by the RTU framing codec,
+/// which shares the PDU and the exception model and only differs in framing).
 #[derive(Debug, Clone, PartialEq, Error)]
 pub enum TcpError {
     /// The socket failed.
-    #[error("modbus TCP transport failed: {0}")]
+    #[error("modbus transport failed: {0}")]
     Transport(String),
     /// A well-formed frame was unexpected (bad echo, truncation, bad length).
-    #[error("modbus TCP protocol error: {0}")]
+    #[error("modbus protocol error: {0}")]
     Protocol(String),
     /// The server answered with an exception frame.
     #[error("modbus exception: function 0x{function:02X}, code 0x{code:02X}")]
@@ -818,7 +819,7 @@ pub fn serve_stream(
     Ok(served)
 }
 
-fn decode_pdu(request: &Request, pdu: &[u8]) -> Result<Response, TcpError> {
+pub(crate) fn decode_pdu(request: &Request, pdu: &[u8]) -> Result<Response, TcpError> {
     let function = pdu[0];
     if function != request.function() {
         return Err(TcpError::Protocol(format!(
@@ -979,7 +980,7 @@ fn push_u16(into: &mut Vec<u8>, value: u16) {
     into.extend_from_slice(&value.to_be_bytes());
 }
 
-fn wrap_frame(transaction: u16, unit: u8, pdu: &[u8]) -> Vec<u8> {
+pub(crate) fn wrap_frame(transaction: u16, unit: u8, pdu: &[u8]) -> Vec<u8> {
     let mut frame = Vec::with_capacity(7 + pdu.len());
     frame.extend_from_slice(&transaction.to_be_bytes());
     frame.extend_from_slice(&0u16.to_be_bytes());

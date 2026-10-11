@@ -10,7 +10,9 @@
 //!
 //! * [`modbus`] — configurable Modbus address map (M5 slice one).
 //! * [`modbus_tcp`] — blocking Modbus TCP master/slave over that map, with
-//!   timeout and retries (M5 slice two); RTU framing is the next slice.
+//!   timeout and retries (M5 slice two).
+//! * [`modbus_rtu`] — RTU framing (CRC-16 + codec) over the same PDU (M5 slice
+//!   three); the serial line itself waits for hardware.
 //! * [`gpio`] — Linux GPIO character device and Raspberry Pi headers (M5).
 //! * [`hal`] — LinuxCNC-style HAL pins and signals (M7).
 
@@ -21,6 +23,7 @@ pub mod gpio;
 pub mod hal;
 pub mod image;
 pub mod modbus;
+pub mod modbus_rtu;
 pub mod modbus_tcp;
 pub mod sim;
 
