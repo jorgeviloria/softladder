@@ -275,10 +275,10 @@ Cada hito termina con criterios de aceptación verificables. **M0 ya está ejecu
 | **M2** ✅ | Editor egui: paleta de elementos, canvas con power flow en vivo, undo/redo por comandos, banco de simulación persistido, panel de problemas, `softladder-edit` sin UI | El test de aceptación `m2_acceptance.rs` abre el semáforo, lo simula (arranque, enclavamiento, stop, temporizador), lo edita, lo guarda y lo reabre idéntico; 330 tests en verde |
 | **M3** ✅ | Import/export ClassicLadder + corpus dorado | Los 41 proyectos del corpus importan sin pánico (272 rungs, 9.273 elementos); `import → export → import` es punto fijo; la segunda exportación es byte a byte idéntica; las partes no modeladas sobreviven intactas; un test de comportamiento prueba que el temporizador importado recibe su enable con preset y base correctos |
 | **M4** | ✅ SFC/Grafcet: modelo, motor de evolución, import/export de `sequential.csv` y editor | 8 gráficos del corpus (73 etapas, 100 transiciones) importan, se ejecutan sin errores y son punto fijo del round-trip; el editor secuencial (documento, paleta, árbol, inspector y diagnósticos clicables) está descrito en `docs/UX.md` §12 y revisado con capturas headless |
-| **M5** | IO: sim scripting, Modbus TCP maestro/esclavo, luego RTU, con mapa configurable | Test de integración con servidor Modbus simulado; esclavo expone el mapa configurado |
-| **M6** | Monitor online + dashboard web + alarmas/journal | Ver y forzar variables desde el navegador; journal consultable; forzado auditado |
+| **M5** ✅ | IO: sim scripteable, mapa Modbus configurable, maestro/esclavo TCP, framing RTU y maestro como `IoDriver` | Maestro y esclavo hablan en loopback (TCP) con pruebas de integración; la línea serie RTU y GPIO piden hardware |
+| **M6** ✅ | Monitor online (TCP + dashboard MVP), roles, journal de alarmas con acuse y `serve` | Ver y forzar variables desde el navegador; journal consultable; forzado auditado; WS/TLS pendientes |
 | **M7** | IO físico (gpiod/rppal) + puente LinuxCNC HAL | Ejecución sobre GPIO real en RPi y lectura/escritura de pines HAL |
-| **M8** | `.sltest`, flight recorder, replay, fuzzing, documentación de usuario | Escenario de test en CI; incidente reproducido desde una grabación |
+| **M8** ✅ | `.sltest` + `softladder test`, flight recorder, replay, fuzzing con proptest, guía en `examples/README.md` | Escenario del semáforo en verde por CLI; incidente reproducido desde una grabación; libFuzzer nocturno pendiente |
 | **M9** | Extras IEC: ST/IL/FBD, PID/PWM/escalado, PLCopen XML, WASM, empaquetado (deb/Homebrew/MSI/AppImage) | PID y un bloque ST funcionando; paquete instalable por plataforma |
 
 Hitos de calidad transversales: cada hito añade sus tests, sus docs y su entrada de `CHANGELOG.md`.
@@ -331,9 +331,48 @@ pruebas tipo pantalla de operador y una barra de estado con badges. La revisión
 headless (`crates/softladder-ui/tests/ui_shots.rs` → `target/ui-shots/`), porque no hay servidor
 gráfico.
 
-**Siguiente paso inmediato**: M4 — SFC/Grafcet (modelo, motor y editor) sobre el mismo corpus
-secuencial, más el cierre de las divergencias de comportamiento listadas en
-`testdata/known-divergences.md`.
+**Siguiente paso inmediato**: M7 — GPIO real y puente HAL (piden hardware Linux/RPi) —
+más WebSocket/TLS del monitor y los extras IEC de M9. M4, M5, M6 y M8 están cerrados
+en lo que no pide hardware; el resto de esta sección lo detalla.
+
+### Deuda resuelta en M8
+
+- Escenarios `.sltest` con runner determinista y forma amable (`"%I0"`, `true`, `17`),
+  subcomando `softladder test` con códigos para CI y ejemplo verde del semáforo.
+- Grabación y replay exacto de corridas, con divergencias localizadas por ciclo y variable.
+- Fuzzing con proptest sobre expresiones, `VarRef`, `.slprj` y el pipeline ClassicLadder
+  completo (sin pánicos; round-trip display del parser incluido).
+- Guía de usuario de `run`/`lint`/`test`/`serve` e import/export en `examples/README.md`,
+  con cada bloque verificado contra el binario.
+
+### Deuda resuelta en M6
+
+- Protocolo JSON por TCP (una petición por línea, bearer primero) y dashboard HTTP mínimo
+  (estado, variables, alarmas, set/force/release/ack), ambos sobre las mismas sesiones
+  auditadas y roles (`viewer`/`operator`/`engineer`).
+- `MonitorTarget` para el runtime real, con mapa de forzados que sostiene cada scan.
+- Journal de alarmas con acuse: los diagnósticos del scan se alzan solos, la reincidencia
+  viva des-acusa, y un test loopback cierra el bucle servidor + runtime.
+- Subcomando `softladder serve`: scan por reloj de pared sirviendo TCP y HTTP a la vez.
+
+### Deuda resuelta en M5
+
+- Simulador scripteable (`SimScript` + `ScriptPlayer`, la línea de tiempo de `.sltest`).
+- Mapa Modbus configurable (base, `I16`/`U16`/`F32`, escala, offset, orden de palabra).
+- Maestro/esclavo TCP bloqueantes con timeout y reintentos, framing RTU con CRC-16 sobre
+  la misma PDU, y maestro como `IoDriver` con troceado a los límites del protocolo.
+- Todo probado en loopback sin dependencias nuevas (solo `std`).
+
+### Deuda resuelta en M4
+
+- Motor SFC con regla de evolución clásica, `%X<n>.A`/`%X<n>.V` e interoperabilidad
+  `sequential.csv` (8 gráficos del corpus: 73 etapas, 100 transiciones).
+- Editor secuencial completo (documento, paleta, árbol, inspector, diagnósticos clicables)
+  con comandos deshacibles, revisado con capturas headless.
+- El carry `%S8` de shift/rotate, que cerró la divergencia 2 de `known-divergences.md`.
+- Rediseño UI/UX contra las herramientas del sector (tokens, ribbon de iconos, escalera
+  con riel de retorno, tablas con filtro/orden/forzado ámbar, banco como pantalla de
+  operador con zonas y tendencia).
 
 ### Deuda resuelta en M3
 
@@ -371,13 +410,17 @@ secuencial, más el cierre de las divergencias de comportamiento listadas en
 
 ### Deuda declarada que sigue abierta
 
-- **Stubs por hito**: descubrimiento de dispositivos online (M6) y el protocolo de monitor legacy (M7),
-  drivers Modbus/GPIO/HAL (M5/M7), servidor del monitor (M6) y Abrir/Guardar en la UI (M2).
-- **Símbolos en la UI**: el modelo ya los enlaza a variables (`Symbol::var`), pero el editor todavía
-  no los usa para mostrar nombres en el canvas (M2).
+- **Pide hardware**: línea serie RTU, GPIO (gpiod/rppal) y puente HAL (M5/M7).
+- **Monitor**: WebSocket, TLS y descubrimiento de dispositivos online (M6); el protocolo de
+  monitor legacy queda para M7.
+- **M9**: ST/IL/FBD, PID/PWM/escalado, PLCopen XML, WASM y empaquetado.
+- **Fuzzing nocturno** con libFuzzer (los parsers ya se fuzzean con proptest en CI).
 - **Sistema de palabras de sistema (`%SW`)**: `%S` existe como bit; falta la familia de palabras de
-  sistema (M2, lo reportará el importador de M3 como aviso).
+  sistema (M2, lo reporta el importador como aviso `SL-W031`).
+- **Cerradas desde que se escribió esta lista**: drivers Modbus, servidor del monitor, Abrir/Guardar
+  en la UI (diálogos en `fileops.rs`) y nombres de símbolos en el canvas (tag sobre dirección).
 
-Verificado en M1: `cargo fmt --all --check` y `cargo clippy --workspace --all-targets -- -D warnings`
-en verde, `cargo test --workspace` con 167 tests, `run` reproducible (mismo proyecto ⇒ mismo JSON) y
-CI en verde en Linux, macOS y Windows.
+Verificado hoy: `cargo fmt --all --check` y `cargo clippy --workspace --all-targets -- -D warnings`
+en verde, `cargo test --workspace` con 627 tests en verde, `run` reproducible (mismo proyecto ⇒
+mismo JSON) y CI en verde en Linux, macOS y Windows. (En M1 eran 167 tests; la cifra de entonces
+se conserva en el historial.)
