@@ -44,6 +44,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SetupError`, value differences are `Mismatch` with cycle, variable, expected and actual.
   The `softladder test` subcommand is the next slice.
 
+## [Unreleased] — Monitor web dashboard (M6, slice six)
+
+### Added
+
+- **Minimal dashboard over plain HTTP, `std` only.** `GET /` serves an offline-friendly page
+  polling `/api/status`, `/api/vars` and `/api/alarms`; `POST /api/set|force|release|ack`
+  mutates through the same audited sessions and roles as the TCP protocol. Bodies use the
+  friendly scalar form. Unknown bearers get `403`, unknown paths `404`. WebSocket and TLS
+  stay for later slices.
+
 ## [Unreleased] — Monitor end to end (M6, slice five)
 
 ### Added

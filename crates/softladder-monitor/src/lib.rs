@@ -30,10 +30,12 @@
 use serde::{Deserialize, Serialize};
 
 pub mod alarms;
+pub mod dashboard;
 pub mod server;
 pub mod session;
 
 pub use alarms::{AlarmJournal, JournalEntry};
+pub use dashboard::{serve_http, DashboardConfig};
 pub use server::{serve, serve_stream, ServerConfig};
 pub use session::{AuditAction, AuditEntry, MonitorTarget, Role, Session, TargetError, Token};
 pub use softladder_core::{Value, VarRef};
