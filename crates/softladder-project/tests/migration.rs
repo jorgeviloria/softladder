@@ -177,7 +177,7 @@ fn the_shipped_example_uses_the_current_schema_and_loads() {
     assert_eq!(project.schema_version, native::CURRENT_SCHEMA_VERSION);
     assert_eq!(project.sections.len(), 1);
     assert_eq!(project.rungs.len(), 4);
-    assert_eq!(project.symbols.len(), 6);
+    assert_eq!(project.symbols.len(), 7);
     assert!(
         project.symbols.iter().all(|symbol| symbol.var.is_some()),
         "every example symbol is bound to a variable"
