@@ -12,3 +12,6 @@ softladder-core = { path = "../softladder-core" }
 softladder-monitor = { path = "../softladder-monitor" }
 softladder-project = { path = "../softladder-project" }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

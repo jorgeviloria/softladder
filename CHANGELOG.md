@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Monitor end to end (M6, slice five)
+
+### Added
+
+- **Loopback acceptance test: server plus real runtime.** `monitor_loopback` runs a lamp rung and
+  a jump to nowhere behind the JSON server: auth, status, force, read-back, alarm list, ack and
+  re-alarm after more faulty scans (a live fault clears the ack by design), with the force
+  holding throughout. The M6 wire loop is closed; dashboard and TLS stay open.
+
 ## [Unreleased] — Monitor alarm journal (M6, slice four)
 
 ### Added
