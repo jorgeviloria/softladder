@@ -118,6 +118,34 @@ pub trait MonitorTarget {
     fn alarms(&self) -> Vec<Alarm>;
 }
 
+/// Forwards to the borrowed target, so servers can share one target across
+/// connections without giving up ownership.
+impl<T: MonitorTarget> MonitorTarget for &mut T {
+    fn status(&self) -> (String, u64, Option<u64>) {
+        (**self).status()
+    }
+
+    fn read(&self, var: &VarRef) -> Option<Value> {
+        (**self).read(var)
+    }
+
+    fn write(&mut self, var: &VarRef, value: &Value) -> Result<Option<Value>, TargetError> {
+        (**self).write(var, value)
+    }
+
+    fn force(&mut self, var: &VarRef, value: &Value) -> Result<Option<Value>, TargetError> {
+        (**self).force(var, value)
+    }
+
+    fn release(&mut self, var: &VarRef) -> bool {
+        (**self).release(var)
+    }
+
+    fn alarms(&self) -> Vec<Alarm> {
+        (**self).alarms()
+    }
+}
+
 /// Which mutating call an [`AuditEntry`] records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

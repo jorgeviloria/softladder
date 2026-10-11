@@ -29,8 +29,10 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod server;
 pub mod session;
 
+pub use server::{serve, serve_stream, ServerConfig};
 pub use session::{AuditAction, AuditEntry, MonitorTarget, Role, Session, TargetError, Token};
 pub use softladder_core::{Value, VarRef};
 

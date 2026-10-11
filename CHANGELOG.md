@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Monitor TCP server (M6, slice three)
+
+### Added
+
+- **Line-delimited JSON server, `std` only.** One request per line, one response back, in order;
+  the first line authenticates the bearer (answered `Ok`, or `unknown_token` + close). Each
+  connection runs its own `Session`, connections are served sequentially, malformed lines answer
+  `bad_request` without closing, and silent clients hit a read timeout. Covered by loopback
+  tests (round-trip, unknown bearer, viewer force denial, bad lines, sequential connections).
+  WebSocket/TLS stay for later slices.
+
 ## [Unreleased] — Monitor runtime target (M6, slice two)
 
 ### Added
