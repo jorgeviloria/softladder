@@ -38,16 +38,18 @@ rebuilds everything around it:
   Your PLC program finally gets unit tests.
 - **Runtime** — deterministic fixed-step scan, scan statistics and jitter measurement, flight
   recorder with exact replay of an incident, fail-safe output policy, optional real-time priority.
-- **IO** — simulator, Modbus TCP/RTU master and slave (with a configurable register map), Linux
-  GPIO, and a LinuxCNC HAL bridge.
+- **IO** — scriptable simulator, Modbus TCP master and slave over a configurable register map
+  (RTU framing codec-tested, serial line pending), Linux GPIO and LinuxCNC HAL stubs.
 - **Observability** — JSON/CBOR monitor protocol over TCP/WebSocket with tokens, TLS and roles, plus
   a small web dashboard; alarms with severities, acknowledgement and a SQLite journal.
 - **Interoperability** — import and export ClassicLadder `.clp` / `.clprj` / `.clprjz` files.
 
 ## Status
 
-**M4 complete.** The engine runs ladder *and* sequential function charts, ClassicLadder projects
-work in both languages, and both have an editor. What works today:
+**M4 complete, M5 in progress.** The engine runs ladder *and* sequential function charts,
+ClassicLadder projects work in both languages, and both have an editor. The IO layer has a
+scriptable simulator and Modbus over a configurable map (TCP master/slave live, RTU framing
+codec-tested). What works today:
 
 - **a real editor UI**, rebuilt against the industrial tools (TIA Portal, Studio 5000, CODESYS,
   TwinCAT, GX Works): a ribbon of command groups, a project tree, document tabs, a ladder document on
@@ -62,6 +64,10 @@ work in both languages, and both have an editor. What works today:
   ladder, with steps as squares (the initial one marked, the active one filled green with its time),
   transitions carrying their condition, links derived from the model, the IEC double bar for AND
   junctions, and every chart edit an undoable command ([`docs/UX.md`](docs/UX.md) §12);
+- **IO, in progress** — the simulator plays deterministic input timelines (`SimScript`) behind the
+  future `.sltest` harness; a blocking Modbus TCP master (timeout + retries) and an in-memory
+  slave serve the configurable map (`I16`/`U16`/`F32`, scale, offset, word order), and the RTU
+  framing codec is tested. Serial line, GPIO and HAL are still stubs;
 - **ClassicLadder import and export**, validated against all 41 upstream example projects
   ([`docs/COMPAT.md`](docs/COMPAT.md), [`testdata/known-divergences.md`](testdata/known-divergences.md));
 - `.slprj` schema v2 with a migration chain from v1, and reproducible headless runs
@@ -76,8 +82,8 @@ There are no display servers in CI, so the interface is reviewed with headless s
 | M1 ✅ | Core: variable accessors, expressions, function blocks, real power flow, diagnostics |
 | M2 ✅ | egui editor: element palette, undo/redo, simulation bench, problems, live power flow |
 | M3 ✅ | ClassicLadder import/export + golden-corpus round trip |
-| M4 | SFC/Grafcet: engine and `sequential.csv` interoperability done; editor in progress |
-| M5 | IO: simulator scripting, Modbus TCP master/slave, then RTU |
+| M4 ✅ | SFC/Grafcet: engine, `sequential.csv` interoperability and editor |
+| M5 | IO: scriptable sim, configurable Modbus map, TCP master/slave and RTU framing done; serial line, GPIO (in progress) |
 | M6 | Online monitor, web dashboard, alarms and journal |
 | M7 | Physical IO (GPIO) + LinuxCNC HAL bridge |
 | M8 | `.sltest` harness, flight recorder, replay, fuzzing |
@@ -107,7 +113,7 @@ cargo test -p softladder-ui --test ui_shots    # writes target/ui-shots/*.png
 ```bash
 # prerequisites: Rust stable (see rust-toolchain.toml)
 
-cargo test --workspace            # unit tests (330+ tests)
+cargo test --workspace            # unit tests (570+ tests)
 cargo run -p softladder-ui        # desktop editor (run it from the repo root)
 cargo run -p softladder-cli -- run examples/traffic_light.slprj --cycles 500   # deterministic
 cargo run -p softladder-cli -- run examples/traffic_light.slprj --real-time    # wall-clock pacing
@@ -133,7 +139,7 @@ crates/softladder-core       domain model, expressions, scan engine, function bl
 crates/softladder-project    .slprj format + ClassicLadder import/export
 crates/softladder-runtime    scheduler, run states, statistics, flight recorder
 crates/softladder-edit       editing commands, undo/redo history and the simulation bench
-crates/softladder-io         IoDriver trait + sim / Modbus / GPIO / HAL drivers
+crates/softladder-io         process image, scriptable sim, Modbus map + TCP/RTU framing
 crates/softladder-monitor    online protocol + web dashboard server
 crates/softladder-ui         egui/eframe editor (main binary)
 crates/softladder-cli        headless run / lint / import / export

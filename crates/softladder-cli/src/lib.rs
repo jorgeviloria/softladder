@@ -63,9 +63,9 @@ pub enum Command {
     Run(RunArgs),
     /// Load a project and report its diagnostics without scanning hardware.
     Lint(LintArgs),
-    /// Import a ClassicLadder `.clprj` project (planned for M3).
+    /// Import a ClassicLadder `.clprj` project.
     Import(ImportArgs),
-    /// Export a project to ClassicLadder `.clprj` format (planned for M3).
+    /// Export a project to ClassicLadder `.clprj` format.
     Export(ExportArgs),
 }
 
