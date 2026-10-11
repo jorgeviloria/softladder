@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 softladder-core = { path = "../softladder-core" }
+softladder-monitor = { path = "../softladder-monitor" }
 softladder-project = { path = "../softladder-project" }
 softladder-runtime = { path = "../softladder-runtime" }
 softladder-io = { path = "../softladder-io" }

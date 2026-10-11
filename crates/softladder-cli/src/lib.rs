@@ -1,6 +1,6 @@
 //! Command line interface for SoftLadder.
 //!
-//! Five subcommands are available:
+//! Six subcommands are available:
 //!
 //! * `run <project>` — loads a project and drives a [`Runtime`] for a number of
 //!   scans. By default the scans use **simulated** time (`now_ms` advances by
@@ -12,6 +12,8 @@
 //! * `export <slprj> -o <clprj>` — ClassicLadder export.
 //! * `test <project> <scenario>` — runs a `.sltest` input timeline against the
 //!   project and checks its output assertions, for CI.
+//! * `serve <project>` — scans on a wall-clock period while serving the monitor
+//!   TCP protocol and the dashboard HTTP page, both against the same runtime.
 //!
 //! Besides the codes documented in `docs/ELEMENTS.md`, `lint` reports the
 //! project-level codes `SL-E010` (duplicate id) and `SL-W010`/`SL-W011` (empty
@@ -23,8 +25,15 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+use std::collections::HashMap;
 use std::ffi::OsString;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
+use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
 use serde::Serialize;
@@ -32,8 +41,13 @@ use serde::Serialize;
 use softladder_core::ElementKind;
 use softladder_core::{Diagnostic, Project, ScanEngine, Severity};
 use softladder_io::{IoDriver, IoImage, SimDriver};
+use softladder_monitor::{
+    serve_http_stream, serve_stream, DashboardConfig, Role, ServerConfig, Token,
+};
 use softladder_project::{classicladder, native};
-use softladder_runtime::{load_scenario, run_scenario, Clock, FailureKind, Runtime};
+use softladder_runtime::{
+    load_scenario, run_scenario, Clock, FailureKind, MonitoredRuntime, Runtime,
+};
 
 /// Exit code for a successful command.
 pub const EXIT_OK: i32 = 0;
@@ -71,6 +85,8 @@ pub enum Command {
     Export(ExportArgs),
     /// Run a `.sltest` scenario against a project.
     Test(TestArgs),
+    /// Scan while serving the monitor protocol and the dashboard.
+    Serve(ServeArgs),
 }
 
 /// Arguments of `softladder run`.
@@ -130,6 +146,31 @@ pub struct TestArgs {
     pub scenario: PathBuf,
 }
 
+/// Arguments of `softladder serve`.
+#[derive(Debug, Args)]
+pub struct ServeArgs {
+    /// SoftLadder project to run (`.slprj` or `.slprjz`).
+    pub project: PathBuf,
+    /// Scans to run before stopping and exiting.
+    #[arg(long, default_value_t = 100)]
+    pub cycles: u64,
+    /// Period between two scans, in milliseconds.
+    ///
+    /// Defaults to the project's `ScanConfig::period_ms`.
+    #[arg(long)]
+    pub period_ms: Option<u64>,
+    /// Address for the monitor TCP protocol.
+    #[arg(long, default_value = "127.0.0.1:4840")]
+    pub monitor_bind: std::net::SocketAddr,
+    /// Address for the dashboard HTTP page.
+    #[arg(long, default_value = "127.0.0.1:8080")]
+    pub http_bind: std::net::SocketAddr,
+    /// Bearer tokens as `id=role` (`viewer`, `operator` or `engineer`),
+    /// repeatable. With none, a default `local=engineer` bearer is used.
+    #[arg(long)]
+    pub token: Vec<String>,
+}
+
 /// Parses command line arguments without touching the process environment.
 pub fn parse_args<I, T>(args: I) -> Result<Cli, clap::Error>
 where
@@ -147,6 +188,7 @@ pub fn execute(cli: Cli) -> i32 {
         Command::Import(args) => import_project(&args),
         Command::Export(args) => export_project(&args),
         Command::Test(args) => test_project(&args),
+        Command::Serve(args) => serve_project(&args),
     }
 }
 
@@ -374,6 +416,208 @@ fn test_project(args: &TestArgs) -> i32 {
     } else {
         EXIT_DIAGNOSTICS
     }
+}
+
+/// Outcome of [`run_serve`].
+#[derive(Debug, PartialEq)]
+struct ServeSummary {
+    /// Scans performed.
+    cycles: u64,
+    /// Monitor TCP connections served.
+    monitor_connections: u64,
+    /// Dashboard HTTP requests served.
+    http_requests: u64,
+}
+
+/// Scans `cycles` on a wall-clock period while serving both protocols.
+///
+/// The scan loop, the monitor listener and the dashboard listener run on
+/// three threads sharing one [`MonitoredRuntime`]; every connection gets its
+/// own audited session. Returns when the scans finish.
+fn run_serve(
+    target: Arc<Mutex<MonitoredRuntime>>,
+    monitor: TcpListener,
+    http: TcpListener,
+    cycles: u64,
+    period_ms: u64,
+    monitor_config: ServerConfig,
+    http_config: DashboardConfig,
+) -> ServeSummary {
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let monitor_connections = Arc::new(AtomicU64::new(0));
+    let http_requests = Arc::new(AtomicU64::new(0));
+
+    let scan_target = Arc::clone(&target);
+    let scan_done = Arc::clone(&done);
+    let scan = std::thread::spawn(move || {
+        for cycle in 1..=cycles {
+            let now_ms = cycle.saturating_mul(period_ms);
+            scan_target.lock().expect("scan lock").tick(now_ms);
+            std::thread::sleep(Duration::from_millis(period_ms));
+        }
+        scan_done.store(true, Ordering::SeqCst);
+        cycles
+    });
+
+    let monitor_target = Arc::clone(&target);
+    let monitor_done = Arc::clone(&done);
+    let monitor_count = Arc::clone(&monitor_connections);
+    let monitor_config = Arc::new(monitor_config);
+    let monitor_thread = std::thread::spawn(move || {
+        accept_loop(monitor, &monitor_done, move |stream| {
+            let mut shared = Arc::clone(&monitor_target);
+            match serve_stream(stream, &mut shared, &monitor_config) {
+                Ok(_) => {
+                    monitor_count.fetch_add(1, Ordering::SeqCst);
+                }
+                Err(error) => eprintln!("monitor connection failed: {error}"),
+            }
+        });
+    });
+
+    let http_target = Arc::clone(&target);
+    let http_done = Arc::clone(&done);
+    let http_count = Arc::clone(&http_requests);
+    let http_config = Arc::new(http_config);
+    let http_thread = std::thread::spawn(move || {
+        accept_loop(http, &http_done, move |stream| {
+            let mut shared = Arc::clone(&http_target);
+            match serve_http_stream(stream, &mut shared, &http_config) {
+                Ok(()) => {
+                    http_count.fetch_add(1, Ordering::SeqCst);
+                }
+                Err(error) => eprintln!("dashboard connection failed: {error}"),
+            }
+        });
+    });
+
+    let cycles = scan.join().expect("scan thread joins");
+    monitor_thread.join().expect("monitor thread joins");
+    http_thread.join().expect("dashboard thread joins");
+    ServeSummary {
+        cycles,
+        monitor_connections: monitor_connections.load(Ordering::SeqCst),
+        http_requests: http_requests.load(Ordering::SeqCst),
+    }
+}
+
+/// Accepts connections until `done` is set, handling each on its own thread.
+///
+/// The listener is non-blocking so the loop notices `done` within milliseconds.
+fn accept_loop(
+    listener: TcpListener,
+    done: &std::sync::atomic::AtomicBool,
+    handle: impl Fn(TcpStream) + Send + Sync + 'static,
+) {
+    if listener.set_nonblocking(true).is_err() {
+        return;
+    }
+    let handle = Arc::new(handle);
+    while !done.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((stream, _)) => {
+                // Accepted sockets inherit non-blocking mode; the session and
+                // dashboard handlers drive blocking reads with timeouts.
+                if stream.set_nonblocking(false).is_err() {
+                    continue;
+                }
+                let handle = Arc::clone(&handle);
+                std::thread::spawn(move || handle(stream));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => {
+                eprintln!("accept failed: {error}");
+                break;
+            }
+        }
+    }
+}
+
+/// Parses `--token id=role` flags; with none, a default local bearer applies.
+fn parse_tokens(flags: &[String]) -> Result<HashMap<String, Token>, String> {
+    if flags.is_empty() {
+        eprintln!("warning: no --token given; using default bearer `local` (engineer)");
+        return Ok(HashMap::from([(
+            "local".to_owned(),
+            Token::new("local".to_owned(), Role::Engineer),
+        )]));
+    }
+    flags
+        .iter()
+        .map(|flag| match flag.split_once('=') {
+            Some((id, role)) if !id.is_empty() => match Role::parse(role) {
+                Some(role) => Ok((id.to_owned(), Token::new(id.to_owned(), role))),
+                None => Err(format!(
+                    "bad --token `{flag}` (role is viewer, operator or engineer)"
+                )),
+            },
+            _ => Err(format!("bad --token `{flag}` (id=role)")),
+        })
+        .collect()
+}
+
+fn serve_project(args: &ServeArgs) -> i32 {
+    let project = match native::load(&args.project) {
+        Ok(project) => project,
+        Err(error) => {
+            eprintln!("error: cannot load `{}`: {error}", args.project.display());
+            return EXIT_USAGE;
+        }
+    };
+    let tokens = match parse_tokens(&args.token) {
+        Ok(tokens) => tokens,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return EXIT_USAGE;
+        }
+    };
+    let target = Arc::new(Mutex::new(MonitoredRuntime::new(project)));
+    target.lock().expect("serve lock").start();
+    let period_ms = args
+        .period_ms
+        .unwrap_or_else(|| target.lock().expect("serve lock").runtime().period_ms);
+
+    let monitor = match TcpListener::bind(args.monitor_bind) {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!(
+                "error: cannot bind monitor to {}: {error}",
+                args.monitor_bind
+            );
+            return EXIT_USAGE;
+        }
+    };
+    let http = match TcpListener::bind(args.http_bind) {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!(
+                "error: cannot bind dashboard to {}: {error}",
+                args.http_bind
+            );
+            return EXIT_USAGE;
+        }
+    };
+    println!(
+        "serve: monitor={} dashboard={} cycles={} period_ms={}",
+        args.monitor_bind, args.http_bind, args.cycles, period_ms,
+    );
+
+    let summary = run_serve(
+        target,
+        monitor,
+        http,
+        args.cycles,
+        period_ms,
+        ServerConfig::new(tokens.clone()),
+        DashboardConfig::new(tokens),
+    );
+    println!(
+        "serve: done cycles={} monitor_connections={} http_requests={}",
+        summary.cycles, summary.monitor_connections, summary.http_requests,
+    );
+    EXIT_OK
 }
 
 fn lint_project(args: &LintArgs) -> i32 {
@@ -701,6 +945,110 @@ mod tests {
             scenario: PathBuf::from("/definitely/not/here.sltest"),
         });
         assert_eq!(code, EXIT_USAGE);
+    }
+
+    #[test]
+    fn serve_arguments_are_parsed() {
+        let cli = Cli::try_parse_from([
+            "softladder",
+            "serve",
+            "project.slprj",
+            "--cycles",
+            "10",
+            "--monitor-bind",
+            "127.0.0.1:4840",
+            "--token",
+            "op-1=operator",
+        ])
+        .expect("parses");
+        match cli.command {
+            Command::Serve(args) => {
+                assert_eq!(args.project, PathBuf::from("project.slprj"));
+                assert_eq!(args.cycles, 10);
+                assert_eq!(args.monitor_bind.port(), 4840);
+                assert_eq!(args.token, vec!["op-1=operator".to_owned()]);
+            }
+            other => panic!("expected the serve subcommand, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn serve_scans_and_answers_both_protocols() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::net::TcpStream;
+
+        let monitor = TcpListener::bind("127.0.0.1:0").expect("loopback binds");
+        let http = TcpListener::bind("127.0.0.1:0").expect("loopback binds");
+        let monitor_addr = monitor.local_addr().expect("listener has an address");
+        let http_addr = http.local_addr().expect("listener has an address");
+        let tokens = HashMap::from([(
+            "eng-1".to_owned(),
+            Token::new("eng-1".to_owned(), Role::Engineer),
+        )]);
+        let project = native::load(&example_project()).expect("example loads");
+        let target = Arc::new(Mutex::new(MonitoredRuntime::new(project)));
+        target.lock().expect("test lock").start();
+        let server = std::thread::spawn(move || {
+            run_serve(
+                target,
+                monitor,
+                http,
+                500,
+                1,
+                ServerConfig::new(tokens.clone()),
+                DashboardConfig::new(tokens),
+            )
+        });
+
+        let stream = TcpStream::connect(monitor_addr).expect("client connects");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("timeout sets");
+        let mut reader = BufReader::new(stream.try_clone().expect("clone connects"));
+        let mut writer = stream;
+        let mut ask = |line: &str| {
+            writer
+                .write_all(format!("{line}\n").as_bytes())
+                .expect("client writes");
+            let mut answer = String::new();
+            reader.read_line(&mut answer).expect("client reads");
+            answer.trim_end().to_owned()
+        };
+        let auth: serde_json::Value =
+            serde_json::from_str(&ask(r#"{"token":"eng-1"}"#)).expect("decodes");
+        assert_eq!(auth, serde_json::json!({"type":"ok"}));
+        let status: serde_json::Value =
+            serde_json::from_str(&ask(r#"{"type":"get_status"}"#)).expect("decodes");
+        assert_eq!(status["state"], "run");
+        let forced: serde_json::Value = serde_json::from_str(&ask(
+            r#"{"type":"force_var","var":{"kind":"PhysIn","index":0,"index_expr":null,"accessor":null},"value":{"Bit":true}}"#,
+        ))
+        .expect("decodes");
+        assert_eq!(forced, serde_json::json!({"type":"ok"}));
+        drop(reader);
+        drop(writer);
+
+        let mut http_stream = TcpStream::connect(http_addr).expect("client connects");
+        http_stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("timeout sets");
+        write!(
+            http_stream,
+            "GET /api/vars?token=eng-1&var=%25I0 HTTP/1.1\r\nHost: x\r\n\r\n"
+        )
+        .expect("client writes");
+        let mut response = String::new();
+        BufReader::new(http_stream)
+            .read_to_string(&mut response)
+            .expect("client reads");
+        assert!(response.starts_with("HTTP/1.0 200"), "{response}");
+        assert!(response.contains(r#""var":"%I0""#), "{response}");
+        assert!(response.contains(r#"{"Bit":true}"#), "{response}");
+
+        let summary = server.join().expect("server joins");
+        assert_eq!(summary.cycles, 500);
+        assert_eq!(summary.monitor_connections, 1);
+        assert_eq!(summary.http_requests, 1);
     }
 
     #[test]

@@ -122,6 +122,38 @@ pub trait MonitorTarget {
     fn acknowledge(&mut self, id: u64, by: &str) -> bool;
 }
 
+/// Locks per call, so threads sharing one target stay consistent without
+/// holding the lock across a whole session.
+impl<T: MonitorTarget + Send> MonitorTarget for std::sync::Arc<std::sync::Mutex<T>> {
+    fn status(&self) -> (String, u64, Option<u64>) {
+        self.lock().expect("target lock").status()
+    }
+
+    fn read(&self, var: &VarRef) -> Option<Value> {
+        self.lock().expect("target lock").read(var)
+    }
+
+    fn write(&mut self, var: &VarRef, value: &Value) -> Result<Option<Value>, TargetError> {
+        self.lock().expect("target lock").write(var, value)
+    }
+
+    fn force(&mut self, var: &VarRef, value: &Value) -> Result<Option<Value>, TargetError> {
+        self.lock().expect("target lock").force(var, value)
+    }
+
+    fn release(&mut self, var: &VarRef) -> bool {
+        self.lock().expect("target lock").release(var)
+    }
+
+    fn alarms(&self) -> Vec<Alarm> {
+        self.lock().expect("target lock").alarms()
+    }
+
+    fn acknowledge(&mut self, id: u64, by: &str) -> bool {
+        self.lock().expect("target lock").acknowledge(id, by)
+    }
+}
+
 /// Forwards to the borrowed target, so servers can share one target across
 /// connections without giving up ownership.
 impl<T: MonitorTarget> MonitorTarget for &mut T {
