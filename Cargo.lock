@@ -3232,6 +3232,7 @@ name = "softladder-runtime"
 version = "0.0.1"
 dependencies = [
  "softladder-core",
+ "softladder-monitor",
  "softladder-project",
  "thiserror 2.0.21",
 ]
