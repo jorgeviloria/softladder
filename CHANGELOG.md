@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Modbus TCP (M5, slice two)
+
+### Added
+
+- **Blocking Modbus TCP master and slave over the configured map, `std` only.** Pure MBAP/PDU
+  codec for `01`/`02`/`03`/`04`/`05`/`06`/`0F`/`10` plus exception frames; `TcpMaster` polls with a
+  per-call connection, timeout and retries (exceptions are returned, never retried); `SlaveStore`
+  answers reads/writes against the wire side of `ModbusMap` and syncs both ways with `IoImage`.
+  Unmapped addresses answer `IllegalDataAddress`. Covered by a loopback integration test (master
+  against a threaded slave) with no new dependencies. RTU framing is the next slice.
+
 ## [Unreleased] — IO mapping (M5, slice one)
 
 ### Added

@@ -8,8 +8,8 @@
 //!
 //! This module is deliberately transport-free: it converts between channel
 //! slices and register/coil slices so the mapping is unit-testable with no
-//! socket and no server. The TCP/RTU transport (polling plan, retries,
-//! supervision) is the next M5 slice and will reuse these conversions.
+//! socket and no server. The blocking TCP master/slave in [`crate::modbus_tcp`]
+//! reuses these conversions; RTU framing is the next M5 slice.
 
 /// Milestone that delivers the Modbus driver.
 pub const MILESTONE: &str = "M5";

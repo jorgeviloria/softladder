@@ -8,8 +8,9 @@
 //!
 //! Real drivers land across M5–M7:
 //!
-//! * [`modbus`] — configurable Modbus address map (M5 slice one); the TCP/RTU
-//!   transport with polling, retries and supervision is the next M5 slice.
+//! * [`modbus`] — configurable Modbus address map (M5 slice one).
+//! * [`modbus_tcp`] — blocking Modbus TCP master/slave over that map, with
+//!   timeout and retries (M5 slice two); RTU framing is the next slice.
 //! * [`gpio`] — Linux GPIO character device and Raspberry Pi headers (M5).
 //! * [`hal`] — LinuxCNC-style HAL pins and signals (M7).
 
@@ -20,8 +21,10 @@ pub mod gpio;
 pub mod hal;
 pub mod image;
 pub mod modbus;
+pub mod modbus_tcp;
 pub mod sim;
 
 pub use image::{IoDriver, IoError, IoImage};
 pub use modbus::{AnalogKind, AnalogMap, ModbusMap, WordOrder};
+pub use modbus_tcp::{SlaveStore, TcpMaster};
 pub use sim::{ScriptPlayer, SimDriver, SimEvent, SimScript};
