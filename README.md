@@ -87,7 +87,7 @@ There are no display servers in CI, so the interface is reviewed with headless s
 | M5 | IO: scriptable sim, configurable Modbus map, TCP master/slave and RTU framing done; serial line, GPIO (in progress) |
 | M6 | Online monitor, web dashboard, alarms and journal |
 | M7 | Physical IO (GPIO) + LinuxCNC HAL bridge |
-| M8 | `.sltest` + `softladder test` + replay done; flight recorder live, fuzzing pending |
+| M8 | `.sltest` + `softladder test` + replay + input fuzzing done; user docs pending |
 | M9 | Extras: ST/IL/FBD, PID/PWM, PLCopen XML, WASM, packaging |
 
 See [`docs/PLAN.md`](docs/PLAN.md) (Spanish) for the full plan, milestones and acceptance criteria.
