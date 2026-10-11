@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — Monitor roles and session (M6, slice one)
+
+### Added
+
+- **Transport-free monitor core.** `Role` (`viewer`/`operator`/`engineer`) gates every `Request`
+  exactly as documented; `Token` carries the bearer and its role; `Session` authorizes before
+  touching the `MonitorTarget`, so refused calls answer `unauthorized` and never reach the
+  runtime; every served mutation appends an `AuditEntry` (token, role, variable, previous
+  value). The TCP/WebSocket transports are the next slice.
+
 ## [Unreleased] — Modbus master driver (M5, slice four)
 
 ### Added

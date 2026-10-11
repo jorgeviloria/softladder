@@ -1,8 +1,9 @@
-//! Monitoring protocol types for SoftLadder — **server lands in M6**.
+//! Monitoring protocol types for SoftLadder — **transports land across M6**.
 //!
 //! This crate defines *what* a monitoring client and a SoftLadder runtime say
-//! to each other, not *how* they say it. The types are plain `serde` data so
-//! that one definition serves every transport.
+//! to each other, not *how* they say it. The message types are plain `serde`
+//! data so that one definition serves every transport, and [`session`] adds
+//! the transport-free core: roles, tokens, audit and the request session.
 //!
 //! # Planned transport (M6)
 //!
@@ -28,6 +29,9 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod session;
+
+pub use session::{AuditAction, AuditEntry, MonitorTarget, Role, Session, TargetError, Token};
 pub use softladder_core::{Value, VarRef};
 
 /// Request sent by a monitoring client to a SoftLadder runtime.
