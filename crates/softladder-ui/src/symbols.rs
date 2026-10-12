@@ -520,6 +520,7 @@ pub fn element_glyph(painter: &Painter, rect: Rect, tokens: &Tokens, kind: Eleme
             &[("E", 0)],
             &[],
         ),
+        ElementKind::Pid => block(painter, rect, style, "PID", &[("EN", -1)], &[("Q", 0)], &[]),
         ElementKind::Compare => expression_box(painter, rect, style, "a = b"),
         ElementKind::Operate => expression_box(painter, rect, style, "a := b"),
         _ => wire(painter, rect, style),

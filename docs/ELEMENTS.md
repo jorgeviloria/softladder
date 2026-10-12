@@ -56,6 +56,7 @@ are counted from the block's own `row`.
 | IEC timer (TON/TOF/TP) | `{"Timer": {"mode": "On" \| "Off" \| "Pulse"}}` | `["<preset ms>"]` | `row` = enable | `%TM<n>.Q` output (bare `%TM<n>`), `.V` elapsed, `.P` preset |
 | Counter (CTU/CTD/CTUD) | `{"Counter": {"kind": "Up" \| "Down" \| "UpDown"}}` | `["<preset>"]` | `row` = reset, `row+1` = preset, `row+2` = count up, `row+3` = count down | `%C<n>.D` done (bare), `.V` value, `.P` preset, `.E` wrapped down, `.F` wrapped up |
 | Register (FIFO/LIFO) | `{"Register": {"mode": "Fifo" \| "Lifo"}}` | `["<capacity>"]` | `row` = reset, `row+1` = in, `row+2` = out | `%R<n>.E` empty (bare), `.F` full, `.I` input value, `.O` output value, `.S` stored count |
+| PID loop | `"Pid"` | `["<kp>", "<ki>", "<kd>", "<period ms>"]` | `row` = enable | `%PID<n>.Q` enabled (bare), `.P` setpoint, `.V` process value, `.O` control output |
 | Bistable RS / SR | `"Bistable"` | `{"kind": "Rs" \| "Sr"}` | — | M2 |
 | Pulse / PWM | `"Pwm"` | `["<period ms>"]` (duty is an input) | M9 |
 | PID | `"Pid"` | `["kp", "ki", "kd", "<period ms>"]` | M9 |
@@ -87,6 +88,7 @@ inspector.
 | Timer (TON/TOF/TP) | `IN` | the enable; the preset is the `PT` parameter | `Q`, plus the `ET` readout label |
 | Counter (CTU/CTD/CTUD) | `R`, `P`, `U`, `D` | reset, load the `PV` preset, count up, count down | `E`, `D`, `F`; the value shows inside as `current/preset` |
 | Register (FIFO/LIFO) | `R`, `IN`, `OUT` | reset, push, pop | `E`, `F`; the count shows inside |
+| PID loop | `EN` | the enable; gains and the sample period are parameters | `Q`; the control output shows inside |
 | Compare, Operate | — (no pin is drawn) | reads the row it sits on | the result, as the block text |
 
 ## Sequential (SFC)

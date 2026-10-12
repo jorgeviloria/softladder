@@ -4738,6 +4738,52 @@ mod tests {
     }
 
     #[test]
+    fn pid_closed_loop_reaches_the_setpoint() {
+        let mut engine = engine(vec![rung(
+            1,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                element_with(
+                    ElementKind::Pid,
+                    Some("%PID0"),
+                    1,
+                    0,
+                    &["1", "1", "0", "100"],
+                ),
+            ],
+        )]);
+        engine
+            .store_mut()
+            .set(&var("%PID0.P"), Value::Word(60))
+            .expect("setpoint can be set");
+        set_bit(&mut engine, "%I0", true);
+        let mut process = 0.0;
+        for scan in 0..300 {
+            engine.scan_once(scan * 10);
+            let output = match get(&engine, "%PID0.O") {
+                Some(Value::Real(value)) => value,
+                other => panic!("control output is real, got {other:?}"),
+            };
+            process = match get(&engine, "%PID0.V") {
+                Some(Value::Real(value)) => value,
+                other => panic!("process is real, got {other:?}"),
+            };
+            // First-order plant: the temperature chases the output.
+            engine
+                .store_mut()
+                .set(
+                    &var("%PID0.V"),
+                    Value::Real(process + (output - process) * 0.1),
+                )
+                .expect("plant can be set");
+        }
+        assert!(
+            (process - 60.0).abs() < 1.0,
+            "loop settled at {process}, want 60"
+        );
+    }
+
+    #[test]
     fn pid_loop_freezes_disabled_and_clamps_windup() {
         let mut engine = engine(vec![rung(
             1,

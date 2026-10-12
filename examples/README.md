@@ -174,6 +174,31 @@ $ cargo run -p softladder-cli -- test examples/turret_hydraulic.slprj examples/t
 test: scenario="hydraulic turret changes with full-turn wrap" project="examples/turret_hydraulic.slprj" cycles=185 asserted=30 failures=0
 ```
 
+## `oven.slprj`
+
+An electric oven held at temperature by a PID loop `%PID0` (kp 1, ki 1, 100 ms
+sample). The setpoint comes from a slider (`%IW0`, 0–100 °C), a first-order plant
+chases the control output by 10 percent a scan, the heater lamp `%Q0` follows the
+output and the ready lamp `%Q1` lights inside a 3-degree band:
+
+| rung | what it does |
+|------|--------------|
+| 1 | The slider `%IW0` is the setpoint `%PID0.P`. |
+| 2 | PID `%PID0` runs while enabled `%I0`. |
+| 3 | The oven: `%PID0.V` chases `%PID0.O` by 10 percent a scan. |
+| 4 | Heater lamp `%Q0` while the output tops 5. |
+| 5 | Ready lamp `%Q1` while `ABS(%PID0.P - %PID0.V)` stays under 3. |
+| 6 | Integer snapshot `%MW10` of the temperature, for trends and tests. |
+
+Play it on the bench: raise *enable*, move *setpoint* to 60 and watch the
+temperature climb and settle — *ready* lights on entry to the band and stays lit.
+`oven.sltest` pins that behaviour (band entered by scan 250, still settled at 600):
+
+```console
+$ cargo run -p softladder-cli -- test examples/oven.slprj examples/oven.sltest
+test: scenario="oven reaches the setpoint" project="examples/oven.slprj" cycles=600 asserted=5 failures=0
+```
+
 ## Writing your own
 
 A project is plain, diff-friendly JSON; see [`docs/FORMAT.md`](../docs/FORMAT.md)

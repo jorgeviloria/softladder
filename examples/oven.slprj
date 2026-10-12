@@ -1,0 +1,132 @@
+{
+  "schema_version": 2,
+  "name": "oven",
+  "author": "SoftLadder contributors",
+  "comment": "Electric oven held by a PID loop: the setpoint comes from a slider, a first-order plant answers the control output, and ready lights inside a 3-degree band.",
+  "sections": [
+    {
+      "id": 1,
+      "name": "Main",
+      "language": "Ladder",
+      "subroutine": null,
+      "rungs": [1, 2, 3, 4, 5, 6]
+    }
+  ],
+  "rungs": [
+    {
+      "id": 1,
+      "label": "setpoint",
+      "comment": "Slider %IW0 (0-100 C) is the setpoint %PID0.P.",
+      "elements": [
+        { "kind": "Operate", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%PID0.P", "=", "%IW0"] }
+      ]
+    },
+    {
+      "id": 2,
+      "label": "loop",
+      "comment": "PID %PID0 runs while enabled %I0: kp 1, ki 1, 100 ms sample.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 0, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "Pid", "var": { "kind": "Pid", "index": 0, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": ["1", "1", "0", "100"] }
+      ]
+    },
+    {
+      "id": 3,
+      "label": "plant",
+      "comment": "First-order oven: the temperature chases the control output by 10 percent a scan.",
+      "elements": [
+        { "kind": "Operate", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%PID0.V", "=", "(%PID0.V + (%PID0.O - %PID0.V) * 0.1)"] }
+      ]
+    },
+    {
+      "id": 4,
+      "label": "heater",
+      "comment": "Heater lamp %Q0 while the control output tops 5.",
+      "elements": [
+        { "kind": "Compare", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%PID0.O", ">", "5"] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] }
+      ]
+    },
+    {
+      "id": 5,
+      "label": "ready",
+      "comment": "Ready lamp %Q1 inside a 3-degree band around the setpoint.",
+      "elements": [
+        { "kind": "Compare", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["ABS(%PID0.P - %PID0.V)", "<", "3"] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] }
+      ]
+    },
+    {
+      "id": 6,
+      "label": "snapshot",
+      "comment": "Integer snapshot of the temperature for trends and tests.",
+      "elements": [
+        { "kind": "Operate", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%MW10", "=", "%PID0.V"] }
+      ]
+    }
+  ],
+  "symbols": [
+    { "name": "enable", "var": { "kind": "PhysIn", "index": 0, "index_expr": null, "accessor": null }, "comment": "Loop enable switch", "unit": null },
+    { "name": "setpoint_in", "var": { "kind": "PhysInWord", "index": 0, "index_expr": null, "accessor": null }, "comment": "Setpoint slider, degrees", "unit": null },
+    { "name": "heater", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null }, "comment": "Heater lamp", "unit": null },
+    { "name": "ready", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "accessor": null }, "comment": "At-temperature lamp", "unit": null },
+    { "name": "setpoint", "var": { "kind": "Pid", "index": 0, "index_expr": null, "accessor": "Preset" }, "comment": "Loop setpoint", "unit": null },
+    { "name": "temperature", "var": { "kind": "Pid", "index": 0, "index_expr": null, "accessor": "Value" }, "comment": "Oven temperature", "unit": null },
+    { "name": "control_out", "var": { "kind": "Pid", "index": 0, "index_expr": null, "accessor": "Out" }, "comment": "Control output", "unit": null },
+    { "name": "temp_snapshot", "var": { "kind": "MemWord", "index": 10, "index_expr": null, "accessor": null }, "comment": "Temperature as an integer", "unit": null }
+  ],
+  "simulation": {
+    "switches": [
+      {
+        "var": {
+          "kind": "PhysIn",
+          "index": 0,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "enable",
+        "momentary": false
+      }
+    ],
+    "lamps": [
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 0,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "heater",
+        "colour": "Amber"
+      },
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 1,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "ready"
+      }
+    ],
+    "analogs": [
+      {
+        "var": {
+          "kind": "PhysInWord",
+          "index": 0,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "setpoint",
+        "min": 0,
+        "max": 100,
+        "unit": ""
+      }
+    ],
+    "gauges": []
+  },
+  "scan": {
+    "period_ms": 10,
+    "input_period_ms": 10
+  }
+}

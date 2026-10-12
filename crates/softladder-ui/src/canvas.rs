@@ -1138,17 +1138,18 @@ fn paint_ghost(
         ElementKind::ContactRising => symbols::contact_rising(painter, glyph, style),
         ElementKind::ContactFalling => symbols::contact_falling(painter, glyph, style),
         ElementKind::Connection => symbols::wire(painter, glyph, style),
-        ElementKind::Timer { .. } | ElementKind::Counter { .. } | ElementKind::Register { .. } => {
-            symbols::block(
-                painter,
-                glyph,
-                style,
-                describe(kind),
-                &block_pins(kind),
-                &block_outputs(kind),
-                block_readouts(kind),
-            )
-        }
+        ElementKind::Timer { .. }
+        | ElementKind::Counter { .. }
+        | ElementKind::Register { .. }
+        | ElementKind::Pid => symbols::block(
+            painter,
+            glyph,
+            style,
+            describe(kind),
+            &block_pins(kind),
+            &block_outputs(kind),
+            block_readouts(kind),
+        ),
         ElementKind::Compare | ElementKind::Operate => {
             symbols::expression_box(painter, glyph, style, "%MW0 = 0")
         }
@@ -1362,7 +1363,10 @@ fn paint_element(
         ElementKind::ContactRising => symbols::contact_rising(painter, glyph, style),
         ElementKind::ContactFalling => symbols::contact_falling(painter, glyph, style),
         ElementKind::Connection => symbols::wire(painter, glyph, style),
-        ElementKind::Timer { .. } | ElementKind::Counter { .. } | ElementKind::Register { .. } => {
+        ElementKind::Timer { .. }
+        | ElementKind::Counter { .. }
+        | ElementKind::Register { .. }
+        | ElementKind::Pid => {
             // Before the first scan a block's stored output is meaningless (a
             // counter with preset zero already reads *done*), so its box only
             // goes live once the engine has run.
@@ -1543,6 +1547,11 @@ fn block_value_text(frame: &Frame<'_>, element: &PlacedElement) -> Option<String
                 });
             Some(format!("{}/{}", read(Accessor::Value), number(preset)))
         }
+        ElementKind::Pid => Some(format!(
+            "{}/{}",
+            read(Accessor::Out),
+            read(Accessor::Preset)
+        )),
         ElementKind::Register { .. } => {
             let capacity = element
                 .params
@@ -1614,7 +1623,10 @@ fn instance_text(var: &softladder_core::VarRef) -> String {
 fn is_block(kind: ElementKind) -> bool {
     matches!(
         kind,
-        ElementKind::Timer { .. } | ElementKind::Counter { .. } | ElementKind::Register { .. }
+        ElementKind::Timer { .. }
+            | ElementKind::Counter { .. }
+            | ElementKind::Register { .. }
+            | ElementKind::Pid
     )
 }
 
@@ -1634,13 +1646,15 @@ fn block_pins(kind: ElementKind) -> Vec<(&'static str, i32)> {
 /// the engine drives, like the reference.
 ///
 /// A counter drives empty/done/full on its first three rows, a register
-/// empty/full on its first two, a timer its output on its only row — so a rung
-/// can chain off any of them, exactly as imported ClassicLadder programs do.
+/// empty/full on its first two, a timer and a PID loop their output on their
+/// only row — so a rung can chain off any of them, exactly as imported
+/// ClassicLadder programs do.
 fn block_outputs(kind: ElementKind) -> Vec<(&'static str, u8)> {
     match kind {
         ElementKind::Timer { .. } => vec![("Q", 0)],
         ElementKind::Counter { .. } => vec![("E", 0), ("D", 1), ("F", 2)],
         ElementKind::Register { .. } => vec![("E", 0), ("F", 1)],
+        ElementKind::Pid => vec![("Q", 0)],
         _ => Vec::new(),
     }
 }
@@ -2386,6 +2400,7 @@ pub fn describe(kind: ElementKind) -> &'static str {
         ElementKind::Register {
             mode: softladder_core::RegisterMode::Lifo,
         } => "LIFO",
+        ElementKind::Pid => "PID",
         other => palette::short_name(other),
     }
 }

@@ -28,7 +28,7 @@ pub struct Entry {
 
 /// The palette, in the order `docs/EDITOR.md` lays it out: contacts first, then
 /// coils, then the function blocks and the plain connection.
-pub static ENTRIES: [Entry; 21] = [
+pub static ENTRIES: [Entry; 22] = [
     Entry {
         kind: ElementKind::ContactNo,
         label: "-[ ]-",
@@ -170,6 +170,13 @@ pub static ENTRIES: [Entry; 21] = [
         letter: 'Z',
         key: Key::Z,
         tooltip: "Last-in first-out register, preset 500",
+    },
+    Entry {
+        kind: ElementKind::Pid,
+        label: "PID",
+        letter: 'Q',
+        key: Key::Q,
+        tooltip: "PID control loop, gains 1 0.1 0",
     },
     Entry {
         kind: ElementKind::Compare,
@@ -459,6 +466,7 @@ pub fn default_params(kind: ElementKind) -> Vec<&'static str> {
         ElementKind::Counter { .. } => vec!["5"],
         ElementKind::Register { .. } => vec!["500"],
         ElementKind::Compare | ElementKind::Operate => vec!["%MW0", "=", "0"],
+        ElementKind::Pid => vec!["1", "1", "0", "100"],
         ElementKind::CoilJump | ElementKind::CoilCall => vec!["0"],
         _ => Vec::new(),
     }
@@ -539,6 +547,7 @@ mod tests {
             ElementKind::Register {
                 mode: RegisterMode::Lifo,
             },
+            ElementKind::Pid,
             ElementKind::Compare,
             ElementKind::Operate,
             ElementKind::Connection,
@@ -548,7 +557,7 @@ mod tests {
                 "{kind:?} is missing from the palette"
             );
         }
-        assert_eq!(entries().len(), 21);
+        assert_eq!(entries().len(), 22);
     }
 
     #[test]
@@ -571,7 +580,6 @@ mod tests {
             assert_eq!(kind_for_key(entry.key), Some(entry.kind));
             assert_eq!(entry_for_kind(entry.kind), Some(entry));
         }
-        assert_eq!(entry_for_key(Key::Q), None);
         assert_eq!(kind_for_key(Key::V), None);
         assert_eq!(
             entry_for_kind(ElementKind::Compare).map(|e| e.letter),

@@ -412,7 +412,7 @@ mod tests {
         assert_eq!(Family::Coils.entries().len(), 4);
         assert_eq!(Family::Timers.entries().len(), 3);
         assert_eq!(Family::Counters.entries().len(), 3);
-        assert_eq!(Family::Data.entries().len(), 4);
+        assert_eq!(Family::Data.entries().len(), 5);
         assert_eq!(Family::Program.entries().len(), 3);
     }
 
@@ -424,6 +424,7 @@ mod tests {
         assert_eq!(family_of(ElementKind::CoilSet), Family::Coils);
         assert_eq!(family_of(ElementKind::Compare), Family::Data);
         assert_eq!(family_of(ElementKind::Operate), Family::Data);
+        assert_eq!(family_of(ElementKind::Pid), Family::Data);
     }
 
     #[test]
@@ -474,6 +475,7 @@ mod tests {
                 ElementKind::Timer { .. }
                     | ElementKind::Counter { .. }
                     | ElementKind::Register { .. }
+                    | ElementKind::Pid
             );
             assert_eq!(
                 short.is_empty(),
