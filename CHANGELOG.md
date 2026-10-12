@@ -69,6 +69,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   well-deserved `SL-W001`), and the `.sltest` example pulses `%I1` five times asserting
   `%C0.V` 1–5 and `%C0.D`.
 
+## [Unreleased] — expression boxes show the whole text
+
+### Changed
+
+- **Compare/operate boxes stretch over empty cells** (up to four columns) so their expression
+  reads whole instead of clipping at one cell. Only longer expressions still elide, with the
+  full text behind the hover tooltip.
+
 ## [Unreleased] — the ladder fills the window
 
 ### Changed

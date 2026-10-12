@@ -743,6 +743,38 @@ fn glyph_rect(cell: Rect, zoom: f32) -> Rect {
     Rect::from_min_max(Pos2::new(cell.left(), top), cell.max)
 }
 
+/// How many columns a compare/operate box may span altogether.
+///
+/// Long expressions read whole instead of clipping at one cell; past this the
+/// text elides with its tooltip behind it, so a runaway expression cannot eat
+/// the row.
+const MAX_EXPRESSION_COLS: u8 = 4;
+
+/// The glyph of a compare/operate box, stretched right over the empty cells
+/// that follow it so its expression reads whole.
+///
+/// The stretch never covers another element and never leaves the grid: past
+/// [`MAX_EXPRESSION_COLS`] columns, or when the row is full, the text elides
+/// as before.
+fn expression_glyph(
+    grid: layout::Layout,
+    rung: &Rung,
+    cols: u8,
+    element: &PlacedElement,
+    zoom: f32,
+) -> Rect {
+    let mut last = element.col;
+    while last.saturating_add(1) < cols
+        && last.saturating_add(1) < element.col.saturating_add(MAX_EXPRESSION_COLS)
+        && queries::element_at_cell(rung, last.saturating_add(1), element.row).is_none()
+    {
+        last = last.saturating_add(1);
+    }
+    let first = layout::cell_rect(element.col, element.row, grid);
+    let end = layout::cell_rect(last, element.row, grid);
+    glyph_rect(Rect::from_min_max(first.min, end.max), zoom)
+}
+
 /// The rectangle a function block's box is drawn in.
 ///
 /// A single-cell block keeps its own cell, grown around the wire so it stays
@@ -923,6 +955,8 @@ fn paint_network(
         let is_block = is_block(element.kind);
         let glyph = if is_block {
             block_rect(grid, element.col, element.row, span, view.zoom)
+        } else if matches!(element.kind, ElementKind::Compare | ElementKind::Operate) {
+            expression_glyph(grid, &network.rung, network.cols, element, view.zoom)
         } else {
             glyph_rect(cell, view.zoom)
         };
@@ -2318,6 +2352,54 @@ mod tests {
         });
         let painter = painter.expect("the frame ran");
         check(&painter)
+    }
+
+    #[test]
+    fn expression_boxes_stretch_over_empty_cells_only() {
+        fn operate(col: u8) -> PlacedElement {
+            PlacedElement::new(ElementKind::Operate, col, 0)
+        }
+        let grid = layout::Layout::with_cell(Pos2::ZERO, Vec2::new(96.0, 80.0));
+        let wide = Rung {
+            elements: vec![
+                operate(0),
+                PlacedElement::with_var(
+                    ElementKind::CoilOut,
+                    VarRef::new(VarKind::PhysOut, 0),
+                    3,
+                    0,
+                ),
+            ],
+            ..Rung::new(1)
+        };
+        // Columns 1 and 2 are free: the box takes them. Column 3 holds the
+        // coil, so the stretch stops before it.
+        let glyph = expression_glyph(grid, &wide, 8, &wide.elements[0], 1.0);
+        assert_eq!(glyph.left(), 0.0);
+        assert_eq!(glyph.right(), 96.0 * 3.0);
+
+        let cramped = Rung {
+            elements: vec![
+                operate(0),
+                PlacedElement::with_var(
+                    ElementKind::ContactNo,
+                    VarRef::new(VarKind::PhysIn, 0),
+                    1,
+                    0,
+                ),
+            ],
+            ..Rung::new(2)
+        };
+        let glyph = expression_glyph(grid, &cramped, 8, &cramped.elements[0], 1.0);
+        assert_eq!(glyph.right(), 96.0);
+
+        // Past the cap the box stops even over empty cells.
+        let empty = Rung {
+            elements: vec![operate(0)],
+            ..Rung::new(3)
+        };
+        let glyph = expression_glyph(grid, &empty, 40, &empty.elements[0], 1.0);
+        assert_eq!(glyph.right(), 96.0 * f32::from(MAX_EXPRESSION_COLS));
     }
 
     #[test]

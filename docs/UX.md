@@ -146,8 +146,9 @@ toggle, not a separate design.
   * Function blocks are rectangles with the instance name above, the block type inside, and named
     pins: timer `IN → Q`, counter `R/LD/CU/CD → Q`, register `R/IN/OUT → E`. Readouts (`ET`, `CV`,
     `F`) and parameters (`PT`, `PV`, `N`) are labels, not pins.
-  * Compare and operate are boxes showing the expression, truncated with an ellipsis and a tooltip
-    that shows it in full.
+  * Compare and operate are boxes showing the expression: the box stretches right over empty
+    cells (up to four columns) so it reads whole, and only longer expressions truncate with an
+    ellipsis and a tooltip that shows them in full.
 * **Rails**: a left power rail, live while the bench is feeding the network, and a right return rail
   just past the last coil. Each coil wires to that rail. The return rail stays `wire_idle`: it is
   the common, not the power.
