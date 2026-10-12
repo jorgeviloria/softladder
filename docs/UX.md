@@ -170,9 +170,10 @@ toggle, not a separate design.
   last network instead of running onto empty paper. Zoom with `Ctrl +/-`, `Ctrl/Cmd` + wheel
   or `Ctrl+0`.
 * **Block pins**: a block in series has one rung input per row the engine reads on the left
-  (`IN`; `R/LD/CU/CD`; `R/IN/OUT`) and a single flow-out on the right (`Q`, or `E` for a
-  register) sitting on the first row's wire, which is where the rung continues. Readouts
-  (`ET`, `CV`, `F`) are labels with no stub: they are read as variables, never wired.
+  (`IN`; `R/LD/CU/CD`; `R/IN/OUT`) and one stub per row the engine drives on the right —
+  counter `E/D/F` on three rows, register `E/F` on two, timer `Q` on one — so a rung can chain
+  off any of them, like the reference. Value readouts (`ET`, `CV`) are labels with no stub:
+  they are read as variables, never wired.
 * **Empty states**: an empty project shows a centred card ("No program yet — **New rung** or open a
   project"); a section with no rungs shows "This section has no rungs"; an unplaced rung shows a
   dashed placeholder "Click a cell to place the armed element".

@@ -205,6 +205,15 @@ A counter block at `(col, row)` occupies four input rows and reads the flow arri
 | Count up | `row + 2` | increment on the rising edge |
 | Count down | `row + 3` | decrement on the rising edge |
 
+| Output | Row | Value |
+| --- | --- | --- |
+| Empty | `row` | `%C<n>.E` |
+| Done | `row + 1` | `%C<n>.D` |
+| Full | `row + 2` | `%C<n>.F` |
+
+Rows with no flag read false, exactly like the reference's unwritten body cells — so a rung
+can chain off any of them, and `%C<n>.V` stays a variable-only readout.
+
 Order of application follows the reference: count up, count down, preset, reset (so a simultaneous
 preset and reset ends at 0). The counter wraps in `0..=9999` and tracks the previous value so that
 `%C<n>.E` ("empty") means *wrapped down from 0* and `%C<n>.F` ("full") means *wrapped up from 9999*.
@@ -230,12 +239,12 @@ ring of `params[0]` slots (literal or variable, default 500). Status: `%R<n>.E` 
 `%R<n>.F` (full), `%R<n>.S` (number of values stored). Pushing when full and popping when empty are
 no-ops (not errors).
 
-`output(cell) = %R<n>.E`.
+| Output | Row | Value |
+| --- | --- | --- |
+| Empty | `row` | `%R<n>.E` |
+| Full | `row + 1` | `%R<n>.F` |
 
-**Divergence:** ClassicLadder exposes the block's boolean outputs as wires leaving the block's *body
-cells* (one row per output). SoftLadder has a single-celled block whose only wire output is the
-primary flag; the other flags are read as variables. Variable states — what the parity tests
-compare — are unaffected.
+The third row has no flag and reads false. `%R<n>.S` stays a variable-only readout.
 
 ### 3.8 Jump (`CoilJump`)
 

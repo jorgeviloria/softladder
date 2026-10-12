@@ -306,16 +306,17 @@ const BLOCK_BODY: f32 = 1.0 - BLOCK_TOP - BLOCK_BOTTOM;
 /// A function block: the type inside the box, named pins on both sides.
 ///
 /// `pins` are `(label, side)` pairs, `side` negative for an input. Exactly the
-/// inputs and the single flow-out pin get wire stubs; the flow-out sits on the
-/// first input's row because that is where a block writes its output (see
-/// `queries::power_map`). `readouts` are value labels (`ET`, `CV`) drawn on
-/// the right with no stub: they are read as variables, never wired.
+/// inputs and the `outputs` get wire stubs; each output sits on its own row
+/// (`(label, row offset)`), because that is where a block writes its flags
+/// (see `queries::power_map`). `readouts` are value labels (`ET`, `CV`) drawn
+/// on the right with no stub: they are read as variables, never wired.
 pub fn block(
     painter: &Painter,
     rect: Rect,
     style: Style,
     title: &str,
     pins: &[(&str, i32)],
+    outputs: &[(&str, u8)],
     readouts: &[&str],
 ) {
     let body = block_body(rect);
@@ -364,21 +365,22 @@ pub fn block(
             style.text.gamma_multiply(0.85),
         );
     }
-    // The flow-out shares the first input's row; anything else on the right
-    // is a readout label, drawn where the old spread put it but with no stub.
-    let outputs: Vec<&str> = pins
-        .iter()
-        .filter(|(_, side)| *side >= 0)
-        .map(|(label, _)| *label)
-        .collect();
-    if let Some(label) = outputs.first() {
+    // One stub per output row, each on its own wire; anything else on the
+    // right is a readout label with no stub.
+    let rows = inputs.len().max(1);
+    let row_y = |offset: u8| -> f32 {
+        let at = usize::from(offset).min(rows - 1);
+        body.top() + body.height() * slot(rows, at)
+    };
+    for (label, offset) in outputs {
+        let pin_y = row_y(*offset);
         painter.hline(
             body.right()..=(body.right() + rect.width() * 0.08),
-            flow_y,
+            pin_y,
             style.wire,
         );
         painter.text(
-            Pos2::new(body.right() - 3.0, flow_y - 1.0),
+            Pos2::new(body.right() - 3.0, pin_y - 1.0),
             Align2::RIGHT_BOTTOM,
             *label,
             font.clone(),
@@ -504,14 +506,20 @@ pub fn element_glyph(painter: &Painter, rect: Rect, tokens: &Tokens, kind: Eleme
         ElementKind::ContactFalling => contact_falling(painter, rect, style),
         ElementKind::Connection => wire(painter, rect, style),
         ElementKind::Timer { .. } => {
-            block(painter, rect, style, "TON", &[("IN", -1), ("Q", 1)], &[])
+            block(painter, rect, style, "TON", &[("IN", -1)], &[("Q", 0)], &[])
         }
         ElementKind::Counter { .. } => {
-            block(painter, rect, style, "CTU", &[("CU", -1), ("Q", 1)], &[])
+            block(painter, rect, style, "CTU", &[("CU", -1)], &[("Q", 0)], &[])
         }
-        ElementKind::Register { .. } => {
-            block(painter, rect, style, "FIFO", &[("IN", -1), ("E", 1)], &[])
-        }
+        ElementKind::Register { .. } => block(
+            painter,
+            rect,
+            style,
+            "FIFO",
+            &[("IN", -1)],
+            &[("E", 0)],
+            &[],
+        ),
         ElementKind::Compare => expression_box(painter, rect, style, "a = b"),
         ElementKind::Operate => expression_box(painter, rect, style, "a := b"),
         _ => wire(painter, rect, style),

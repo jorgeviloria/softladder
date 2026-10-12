@@ -409,6 +409,25 @@ pub fn element_at_cell(rung: &Rung, col: u8, row: u8) -> Option<&PlacedElement> 
     })
 }
 
+/// The flag a block drives on its `offset`-th input row, mirroring the scan
+/// engine: a counter drives empty/done/full on its first three rows, a
+/// register empty/full on its first two, and rows with no flag read false,
+/// exactly like the reference's unwritten body cells.
+fn block_row_output(element: &PlacedElement, store: &VarStore, offset: usize) -> bool {
+    let accessor = match (&element.kind, offset) {
+        (ElementKind::Timer { .. }, 0) => return element_energised(element, store),
+        (ElementKind::Counter { .. }, 0) => Accessor::Empty,
+        (ElementKind::Counter { .. }, 1) => Accessor::Done,
+        (ElementKind::Counter { .. }, 2) => Accessor::Full,
+        (ElementKind::Register { .. }, 0) => Accessor::Empty,
+        (ElementKind::Register { .. }, 1) => Accessor::Full,
+        _ => return false,
+    };
+    block_value(element, store, accessor)
+        .map(Value::as_bool)
+        .unwrap_or(false)
+}
+
 /// Power flow for every cell of `rung`, as the scan engine computes it.
 ///
 /// This is [`power_grid`] extended with the two things the live diagram needs:
@@ -451,14 +470,12 @@ pub fn power_map(rung: &Rung, store: &VarStore) -> Vec<CellPower> {
             let row = usize::from(element.row);
             let span = usize::from(block_span(element.kind));
             if span > 1 {
-                // A block writes its own output on its first row; the rest of
-                // its rows are inputs, so they conduct what reaches them.
-                if let Some(slot) = current.get_mut(row) {
-                    *slot = element_energised(element, store);
-                }
-                for offset in 1..span {
+                // One output per input row, like the engine: flags on the rows
+                // that have one, false where the reference leaves its body
+                // cells unwritten.
+                for offset in 0..span {
                     if let Some(slot) = row.checked_add(offset).and_then(|at| current.get_mut(at)) {
-                        *slot = fed.get(row + offset).copied().unwrap_or(false);
+                        *slot = block_row_output(element, store, offset);
                     }
                 }
             } else if let Some(slot) = current.get_mut(row) {

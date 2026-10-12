@@ -77,6 +77,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default, toggled from Tools, the View menu or the project tree, closable with `×`) so the
   operator screen stays visible while the ladder runs beside it.
 
+## [Unreleased] — blocks drive every output row, like ClassicLadder
+
+### Changed
+
+- **Counter and register flags are wires again.** Verified against the reference (`CalcTypeCounter`,
+  register block): counters drive empty/done/full on rows `y`/`y+1`/`y+2`, registers empty/full on
+  `y`/`y+1`, with the same input rows and apply order — so imported rungs chaining off a secondary
+  row now run as written. Rows with no flag read false; `%C0.V` stays variable-only. Closes
+  divergence 1 (`testdata/known-divergences.md`); the timer's second-row `Running` output stays out.
+
 ## [Unreleased] — the scroll stops at the rungs
 
 ### Changed

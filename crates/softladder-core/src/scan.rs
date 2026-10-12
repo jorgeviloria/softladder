@@ -1954,15 +1954,35 @@ impl Machine<'_> {
             *input = self.state_on_left_grid(block, block.row as usize + offset);
         }
 
-        let output = match element.kind {
-            ElementKind::Timer { mode } => self.update_timer(element, block, mode, inputs[0]),
-            ElementKind::Counter { kind } => self.update_counter(element, block, kind, inputs),
-            ElementKind::Register { mode } => self.update_register(element, block, mode, inputs),
-            _ => false,
+        // One output per input row, like the reference: a counter drives its
+        // empty, done and full flags on its first three rows, a register its
+        // empty and full flags on its first two. Rows with no flag read false,
+        // exactly like the reference's unwritten body cells.
+        let outputs: [Option<bool>; 4] = match element.kind {
+            ElementKind::Timer { mode } => [
+                Some(self.update_timer(element, block, mode, inputs[0])),
+                None,
+                None,
+                None,
+            ],
+            ElementKind::Counter { kind } => {
+                let (empty, done, full) = self.update_counter(element, block, kind, inputs);
+                [Some(empty), Some(done), Some(full), Some(false)]
+            }
+            ElementKind::Register { mode } => {
+                let (empty, full) = self.update_register(element, block, mode, inputs);
+                [Some(empty), Some(full), Some(false), None]
+            }
+            _ => [None, None, None, None],
         };
 
-        if let Some(cell) = self.output_next.get_mut(block.row as usize) {
-            *cell = output;
+        for (offset, output) in outputs.iter().enumerate().take(usize::from(block.span)) {
+            if let (Some(cell), Some(value)) = (
+                self.output_next.get_mut(block.row as usize + offset),
+                output,
+            ) {
+                *cell = *value;
+            }
         }
     }
 
@@ -1994,13 +2014,16 @@ impl Machine<'_> {
     }
 
     /// Runs one scan of a counter block.
+    ///
+    /// Returns the empty, done and full flags in row order, which is what the
+    /// block drives on its first three rows.
     fn update_counter(
         &mut self,
         element: &PlacedElement,
         block: &BlockCell,
         kind: CounterKind,
         inputs: [bool; 4],
-    ) -> bool {
+    ) -> (bool, bool, bool) {
         let preset = self.block_preset(element);
         let [reset, load, up, down] = inputs;
         match self.store.counter_mut(block.index) {
@@ -2008,26 +2031,29 @@ impl Machine<'_> {
                 counter.kind = kind;
                 counter.preset = clamp_i32(preset as i64).clamp(0, COUNTER_MAX);
                 counter.emulate(up, down, reset, load);
-                counter.done()
+                (counter.is_empty(), counter.done(), counter.is_full())
             }
             None => {
                 self.error(
                     "SL-E003",
                     format!("counter {} is out of range", element_text(element)),
                 );
-                false
+                (false, false, false)
             }
         }
     }
 
     /// Runs one scan of a register block.
+    ///
+    /// Returns the empty and full flags in row order, which is what the block
+    /// drives on its first two rows.
     fn update_register(
         &mut self,
         element: &PlacedElement,
         block: &BlockCell,
         mode: RegisterMode,
         inputs: [bool; 4],
-    ) -> bool {
+    ) -> (bool, bool) {
         let capacity = self.block_capacity(element);
         let [reset, push, pop, _] = inputs;
         match self.store.register_mut(block.index) {
@@ -2035,14 +2061,14 @@ impl Machine<'_> {
                 register.mode = mode;
                 register.set_capacity(capacity);
                 register.update(reset, push, pop);
-                register.is_empty()
+                (register.is_empty(), register.is_full())
             }
             None => {
                 self.error(
                     "SL-E003",
                     format!("register {} is out of range", element_text(element)),
                 );
-                true
+                (true, false)
             }
         }
     }
@@ -4511,7 +4537,9 @@ mod tests {
                     0,
                     &["3"],
                 ),
-                element(ElementKind::CoilOut, Some("%Q0"), 2, 0),
+                // Done leaves on the row below the block, like the reference:
+                // row 0 carries empty, row 1 done, row 2 full.
+                element(ElementKind::CoilOut, Some("%Q0"), 2, 1),
             ],
         )]);
         for (now, pressed) in [

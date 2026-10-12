@@ -8,21 +8,10 @@ slightly different when it runs.
 Every entry states what the reference does, what SoftLadder does, and why we chose that. Entries are
 removed when a milestone closes the gap.
 
-## 1. The flag that leaves a block's output cell
+## 1. Block outputs per row — closed, see below
 
-**Reference:** a counter writes its `empty` flag to the wire leaving its own cell (row `y`), `done`
-one row below and `full` two rows below; a register writes `empty` on its own row and `full` below.
-
-**SoftLadder:** a block occupies one cell whose wire output is its primary flag — `Q` for a timer,
-`done` for a counter, `empty` for a register — and the other flags are read as variables
-(`%C0.E`, `%C0.F`, `%R0.F`, …).
-
-**Why:** the variable states, which is what the parity tests compare, are identical; only a rung that
-chains off one of the *secondary* rows of a block differs. Modelling four output rows per block would
-put the reference's body-cell geometry back into the model for no gain, since the editor shows every
-flag as a variable.
-
-**Affects:** imported rungs that chain an element after a counter's row `y+1` or `y+2`.
+This entry is kept so old links land somewhere: a rung chaining off a counter's `y+1`/`y+2` row
+now reads `done`/`full`, and off a register's `y+1` row `full`, exactly like the reference.
 
 ## 2. Word width in expressions
 
@@ -79,6 +68,13 @@ base preserved.
 
 ## Closed
 
+* **The flag that leaves a block's output cell (was item 1).** Counters drive empty/done/full
+  on rows `y`/`y+1`/`y+2` and registers empty/full on `y`/`y+1`, verified against `calc.c`
+  (`CalcTypeCounter`, register block): same input rows, same output rows, same apply order
+  (count, preset, reset). Rows with no flag read false, like the reference's unwritten body
+  cells. Deliberately not copied: the IEC timer's second-row `Running` output (our timer stays
+  one row) and the `%C0.E`/`.F` latch-vs-arrival nuance — both recorded here instead of
+  silently differing.
 * **The rotate and shift side effect (was item 2).** `SHL`, `SHR`, `ROL` and `ROR` now publish the
   bit that left the operand to `%S8`, exactly as `arithm_eval.c` does it: the operand's most
   significant bit for a left shift or rotate, its least significant bit for a right one, whatever the
@@ -94,10 +90,7 @@ base preserved.
 
 ## Closing these
 
-Item 1 is a trade rather than a gap: closing it would turn a counter's single output cell into three,
-putting the reference's body-cell geometry back into the model, for a difference that shows only in a
-rung that chains off a *secondary* row of a block — the flag itself is already readable as a variable
-(`%C0.E`, `%C0.F`, …). Items 2 to 6 are the shape of the two implementations rather than gaps to
+Items 2 to 6 are the shape of the two implementations rather than gaps to
 close.
 
 The SFC milestone (M4) has landed, and the sequential projects were measured the way this corpus was:

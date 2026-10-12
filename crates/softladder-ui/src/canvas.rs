@@ -1126,6 +1126,7 @@ fn paint_ghost(
                 style,
                 describe(kind),
                 &block_pins(kind),
+                &block_outputs(kind),
                 block_readouts(kind),
             )
         }
@@ -1353,6 +1354,7 @@ fn paint_element(
                 style,
                 describe(element.kind),
                 &block_pins(element.kind),
+                &block_outputs(element.kind),
                 block_readouts(element.kind),
             );
             if frame.live {
@@ -1597,32 +1599,30 @@ fn is_block(kind: ElementKind) -> bool {
     )
 }
 
-/// The wire pins of a function block: its **inputs** on the left, its single
-/// flow-out on the right, sitting on the first input's row.
+/// The wire pins on the left of a function block: its **inputs**.
 ///
 /// The inputs are not listed here — they are [`ElementKind::input_pins`], the
 /// same table the engine takes its block span from. That is the point: a pin is
-/// only drawn where the engine actually reads or writes a wire, so the drawing
-/// can never advertise a connection that does nothing. A timer therefore shows
-/// a single input (`IN`); its preset is a *parameter* (`%TM0.P`), drawn as a
-/// parameter by [`block_parameter_text`] rather than as a pin. The flow-out is
-/// the block's own variable (`Q`, or `E` for a register), which is what the
-/// rung continues with on the first row.
+/// only drawn where the engine actually reads a wire, so the drawing can never
+/// advertise a connection that does nothing. A timer therefore shows a single
+/// input (`IN`); its preset is a *parameter* (`%TM0.P`), drawn as a parameter by
+/// [`block_parameter_text`] rather than as a pin.
 fn block_pins(kind: ElementKind) -> Vec<(&'static str, i32)> {
-    let mut pins: Vec<(&'static str, i32)> =
-        kind.input_pins().iter().map(|label| (*label, -1)).collect();
-    if let Some(flow) = block_flow_output(kind) {
-        pins.push((flow, 1));
-    }
-    pins
+    kind.input_pins().iter().map(|label| (*label, -1)).collect()
 }
 
-/// The flow-out of a block: the variable the rung continues with.
-fn block_flow_output(kind: ElementKind) -> Option<&'static str> {
+/// The wire pins on the right of a function block: one `(label, row)` per row
+/// the engine drives, like the reference.
+///
+/// A counter drives empty/done/full on its first three rows, a register
+/// empty/full on its first two, a timer its output on its only row — so a rung
+/// can chain off any of them, exactly as imported ClassicLadder programs do.
+fn block_outputs(kind: ElementKind) -> Vec<(&'static str, u8)> {
     match kind {
-        ElementKind::Timer { .. } | ElementKind::Counter { .. } => Some("Q"),
-        ElementKind::Register { .. } => Some("E"),
-        _ => None,
+        ElementKind::Timer { .. } => vec![("Q", 0)],
+        ElementKind::Counter { .. } => vec![("E", 0), ("D", 1), ("F", 2)],
+        ElementKind::Register { .. } => vec![("E", 0), ("F", 1)],
+        _ => Vec::new(),
     }
 }
 
@@ -1632,7 +1632,7 @@ fn block_readouts(kind: ElementKind) -> &'static [&'static str] {
     match kind {
         ElementKind::Timer { .. } => &["ET"],
         ElementKind::Counter { .. } => &["CV"],
-        ElementKind::Register { .. } => &["F"],
+        ElementKind::Register { .. } => &[],
         _ => &[],
     }
 }
@@ -2902,57 +2902,47 @@ mod tests {
         );
     }
 
-    /// The user's report: only the flow-out gets a stub on the right, sitting
-    /// on the first row's wire, while the readouts are labels with no stub —
-    /// `ET`/`CV`/`F` are read as variables and can never be wired.
+    /// Like the reference: a block drives one flag per output row, each with a
+    /// stub on its own wire, while value readouts stay stub-less labels.
     #[test]
-    fn only_the_flow_out_is_wirable_on_the_right() {
-        for (kind, flow, readout) in [
+    fn block_outputs_follow_the_reference_rows() {
+        for (kind, outputs) in [
             (
                 ElementKind::Timer {
                     mode: TimerMode::On,
                 },
-                "Q",
-                "ET",
+                vec![("Q", 0)],
             ),
             (
                 ElementKind::Counter {
                     kind: CounterKind::Up,
                 },
-                "Q",
-                "CV",
+                vec![("E", 0), ("D", 1), ("F", 2)],
             ),
             (
                 ElementKind::Register {
                     mode: RegisterMode::Fifo,
                 },
-                "E",
-                "F",
+                vec![("E", 0), ("F", 1)],
             ),
         ] {
-            let pins = block_pins(kind);
-            let outputs: Vec<&str> = pins
-                .iter()
-                .filter(|(_, side)| *side >= 0)
-                .map(|(label, _)| *label)
-                .collect();
-            assert_eq!(outputs, [flow], "{kind:?} has one wirable output");
             assert_eq!(
-                block_flow_output(kind),
-                Some(flow),
-                "{kind:?} continues the rung with {flow}"
-            );
-            assert_eq!(
-                block_readouts(kind),
-                [readout],
-                "{kind:?} keeps {readout} as a stub-less readout"
-            );
-            assert!(
-                !block_readouts(kind).contains(&flow),
-                "the flow-out is a wire, not a readout"
+                block_outputs(kind),
+                outputs,
+                "{kind:?} drives one stub per output row"
             );
         }
-        assert_eq!(block_flow_output(ElementKind::ContactNo), None);
+        assert!(block_outputs(ElementKind::ContactNo).is_empty());
+        assert_eq!(
+            block_readouts(ElementKind::Counter {
+                kind: CounterKind::Up
+            }),
+            ["CV"]
+        );
+        assert!(block_readouts(ElementKind::Register {
+            mode: RegisterMode::Fifo
+        })
+        .is_empty());
         assert!(block_readouts(ElementKind::ContactNo).is_empty());
     }
 
