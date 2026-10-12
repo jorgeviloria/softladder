@@ -336,33 +336,50 @@ fn paint_paper(painter: &Painter, paper: Rect, tokens: &Tokens) {
     );
 }
 
-/// Draws the engineering grid on the paper, aligned with the document origin.
+/// Vertical grid lines through cell centres, so a line crosses each component
+/// instead of running between columns.
+fn grid_verticals(paper: Rect, origin_x: f32, cell_x: f32) -> Vec<f32> {
+    if cell_x < 7.0 || !cell_x.is_finite() {
+        return Vec::new();
+    }
+    let mut lines = Vec::new();
+    let mut x = origin_x + cell_x * 0.5;
+    let mut guard = 0;
+    while x <= paper.right() && guard < 512 {
+        if x >= paper.left() {
+            lines.push(x);
+        }
+        x += cell_x;
+        guard += 1;
+    }
+    lines
+}
+
+/// Draws the engineering grid on the paper, aligned with the components: the
+/// verticals cross cell centres and the horizontals run on the row wires,
+/// which is where the symbols and their power flow live.
 fn paint_grid(painter: &Painter, paper: Rect, view: View, networks: &[Network], tokens: &Tokens) {
-    let cell = Vec2::new(view.pitch, ROW_PITCH * view.zoom);
+    let Some(first) = networks.first() else {
+        return;
+    };
+    let grid = view.layout(first.grid_top());
+    let cell = grid.cell;
     if cell.x < 7.0 || cell.y < 7.0 || !cell.x.is_finite() || !cell.y.is_finite() {
         return;
     }
     let stroke = Stroke::new(1.0_f32, tokens.paper_grid);
-    let mut x = view.origin.x;
-    let mut guard = 0;
-    while x <= paper.right() && guard < 512 {
-        if x >= paper.left() {
-            painter.vline(x, paper.y_range(), stroke);
-        }
-        x += cell.x;
-        guard += 1;
+    for x in grid_verticals(paper, grid.origin.x, cell.x) {
+        painter.vline(x, paper.y_range(), stroke);
     }
-    let bottom = networks
-        .last()
-        .map_or(view.origin.y, |network| view.point(0.0, network.bottom()).y);
-    let mut y = view.origin.y;
-    let mut guard = 0;
-    while y <= paper.bottom() && guard < 512 {
-        if y >= paper.top() && y <= bottom + cell.y {
-            painter.hline(paper.x_range(), y, stroke);
+    let wire_off = (LABEL_GUTTER + GLYPH_H * 0.5) * view.zoom;
+    for network in networks {
+        let grid = view.layout(network.grid_top());
+        for row in 0..network.rows {
+            let y = grid.origin.y + f32::from(row) * cell.y + wire_off;
+            if y >= paper.top() && y <= paper.bottom() {
+                painter.hline(paper.x_range(), y, stroke);
+            }
         }
-        y += cell.y;
-        guard += 1;
     }
 }
 
@@ -2490,6 +2507,17 @@ mod tests {
         let clamped = clamp_camera(paper, drifted, &short);
         assert_eq!(clamped.pan.x, 0.0, "left edge holds");
         assert_eq!(clamped.pan.y, 0.0, "top edge holds");
+    }
+
+    #[test]
+    fn grid_verticals_cross_cell_centres() {
+        let paper = Rect::from_min_size(Pos2::ZERO, vec2(500.0, 400.0));
+        // Cells of 100 pt from x = 34: centres at 84, 184, 284, 384, 484.
+        let lines = grid_verticals(paper, 34.0, 100.0);
+        assert_eq!(lines, vec![84.0, 184.0, 284.0, 384.0, 484.0]);
+        // Degenerate pitches draw nothing instead of a bogus grid.
+        assert!(grid_verticals(paper, 34.0, 0.0).is_empty());
+        assert!(grid_verticals(paper, 34.0, f32::NAN).is_empty());
     }
 
     #[test]

@@ -95,6 +95,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   row now run as written. Rows with no flag read false; `%C0.V` stays variable-only. Closes
   divergence 1 (`testdata/known-divergences.md`); the timer's second-row `Running` output stays out.
 
+## [Unreleased] — the grid meets the components
+
+### Changed
+
+- **Grid lines run through cells, not between them.** Verticals cross cell centres and horizontals
+  run on the row wires, from the same layout the hit-testing uses — so the grid meets every
+  symbol and its power flow instead of drifting past them.
+
 ## [Unreleased] — the scroll stops at the rungs
 
 ### Changed
