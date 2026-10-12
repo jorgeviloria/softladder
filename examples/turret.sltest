@@ -1,0 +1,34 @@
+{
+  "name": "turret tool change there and back",
+  "steps": [
+    {"cycle": 0, "var": "%I3", "value": true},
+    {"cycle": 36, "var": "%IW0", "value": 3},
+    {"cycle": 37, "var": "%I3", "value": false},
+    {"cycle": 40, "var": "%I0", "value": true},
+    {"cycle": 45, "var": "%I1", "value": true},
+    {"cycle": 50, "var": "%I0", "value": false},
+    {"cycle": 52, "var": "%I3", "value": true},
+    {"cycle": 86, "var": "%IW0", "value": 1},
+    {"cycle": 87, "var": "%I3", "value": false},
+    {"cycle": 90, "var": "%I0", "value": true},
+    {"cycle": 95, "var": "%I1", "value": false},
+    {"cycle": 97, "var": "%I3", "value": true}
+  ],
+  "assertions": [
+    {"cycle": 5, "var": "%Q0", "expected": false},
+    {"cycle": 35, "var": "%Q3", "expected": true},
+    {"cycle": 38, "var": "%Q2", "expected": true},
+    {"cycle": 38, "var": "%Q0", "expected": true},
+    {"cycle": 38, "var": "%Q1", "expected": false},
+    {"cycle": 51, "var": "%Q0", "expected": false},
+    {"cycle": 51, "var": "%MW1", "expected": 3},
+    {"cycle": 85, "var": "%Q3", "expected": true},
+    {"cycle": 85, "var": "%Q2", "expected": false},
+    {"cycle": 88, "var": "%Q0", "expected": true},
+    {"cycle": 88, "var": "%Q1", "expected": true},
+    {"cycle": 96, "var": "%Q0", "expected": false},
+    {"cycle": 96, "var": "%MW1", "expected": 1},
+    {"cycle": 130, "var": "%Q3", "expected": true},
+    {"cycle": 130, "var": "%Q4", "expected": false}
+  ]
+}

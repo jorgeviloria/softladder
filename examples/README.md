@@ -109,6 +109,37 @@ projects that the M3 compatibility tests run against (they skip when the corpus
 is missing). Behavioural differences that remain are listed in
 [`testdata/known-divergences.md`](../testdata/known-divergences.md).
 
+## `turret.slprj`
+
+An 8-tool CNC lathe turret (tools T0–T7) with Gray-code position feedback, an
+unclamp/rotate/clamp cycle, shortest-path direction, a settle timer and a
+rotation watchdog:
+
+| rung | what it does |
+|------|--------------|
+| 1 | Decodes Gray bits `%I2 %I1 %I0` into the binary position `%MW1`. |
+| 2 | Forward distance from position to request `%IW0`, modulo 8, into `%MW2` (0 means home). |
+| 3 | Off-target unclamps: `%Q2` while `%MW2` is not zero. |
+| 4 | Runs the motor `%Q0` only unclamped (`%I3` open), off-target and fault-free. |
+| 5 | Picks the direction `%Q1`: forward up to 4 steps away, reverse beyond that. |
+| 6 | TON `%TM0` waits 300 ms on target before the change counts. |
+| 7 | Settled and clamped: the tool-ready lamp `%Q3`. |
+| 8–9 | Watchdog: `%TM1` trips `%Q4` when a rotation takes longer than 10 s, which stops the motor. |
+
+Play it on the bench: set the *requested tool* slider, open the *clamped*
+switch, and flip the three Gray switches to "turn" the turret — the motor,
+direction and done lamps follow. `turret.sltest` scripts the whole loop
+(to T3 forward, back to T1 in reverse) with 15 assertions:
+
+```console
+$ cargo run -p softladder-cli -- test examples/turret.slprj examples/turret.sltest
+test: scenario="turret tool change there and back" project="examples/turret.slprj" cycles=130 asserted=15 failures=0
+```
+
+Toward LinuxCNC: every variable already uses IEC naming (`%I` sensors, `%Q`
+actuators), so the M7 HAL bridge will map them 1:1 onto HAL pins; until then,
+commission the cycle here in simulation.
+
 ## Writing your own
 
 A project is plain, diff-friendly JSON; see [`docs/FORMAT.md`](../docs/FORMAT.md)

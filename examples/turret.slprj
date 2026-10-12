@@ -1,0 +1,226 @@
+{
+  "schema_version": 2,
+  "name": "turret",
+  "author": "SoftLadder contributors",
+  "comment": "CNC lathe turret: 8 tools with Gray-code position feedback, unclamp/rotate/clamp cycle with shortest-path direction, settle timer and rotation watchdog.",
+  "sections": [
+    {
+      "id": 1,
+      "name": "Main",
+      "language": "Ladder",
+      "subroutine": null,
+      "rungs": [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    }
+  ],
+  "rungs": [
+    {
+      "id": 1,
+      "label": "decode_gray",
+      "comment": "Gray bits %I2 %I1 %I0 become the binary position %MW1 (tools T0-T7).",
+      "elements": [
+        { "kind": "Operate", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%MW1", "=", "(%I2 * 4 + (%I1 XOR %I2) * 2 + (%I0 XOR %I1 XOR %I2))"] }
+      ]
+    },
+    {
+      "id": 2,
+      "label": "distance",
+      "comment": "Forward distance from position to request %IW0, modulo 8: 0 means home.",
+      "elements": [
+        { "kind": "Operate", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%MW2", "=", "((%IW0 - %MW1 + 8) & 7)"] }
+      ]
+    },
+    {
+      "id": 3,
+      "label": "unclamp",
+      "comment": "While away from the requested tool, energize the unclamp solenoid %Q2.",
+      "elements": [
+        { "kind": "Compare", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%MW2", "<>", "0"] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 2, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] }
+      ]
+    },
+    {
+      "id": 4,
+      "label": "rotate",
+      "comment": "Run the motor %Q0 only unclamped, off-target and fault-free.",
+      "elements": [
+        { "kind": "ContactNc", "var": { "kind": "PhysIn", "index": 3, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "Compare", "var": null, "col": 1, "row": 0, "connected_with_top": false, "params": ["%MW2", "<>", "0"] },
+        { "kind": "ContactNc", "var": { "kind": "PhysOut", "index": 4, "index_expr": null, "accessor": null }, "col": 2, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null }, "col": 3, "row": 0, "connected_with_top": false, "params": [] }
+      ]
+    },
+    {
+      "id": 5,
+      "label": "direction",
+      "comment": "Shortest path: forward up to 4 steps away, reverse beyond that.",
+      "elements": [
+        { "kind": "Compare", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%MW2", ">", "4"] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] }
+      ]
+    },
+    {
+      "id": 6,
+      "label": "settle",
+      "comment": "TON %TM0 waits 300 ms on target before the change counts as done.",
+      "elements": [
+        { "kind": "Compare", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%MW2", "=", "0"] },
+        { "kind": { "Timer": { "mode": "On" } }, "var": { "kind": "TimerIec", "index": 0, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": ["300"] }
+      ]
+    },
+    {
+      "id": 7,
+      "label": "done",
+      "comment": "Settled on target and clamped: the tool is ready %Q3.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "TimerIec", "index": 0, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 3, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 3, "index_expr": null, "accessor": null }, "col": 2, "row": 0, "connected_with_top": false, "params": [] }
+      ]
+    },
+    {
+      "id": 8,
+      "label": "watchdog",
+      "comment": "TON %TM1 trips when a rotation takes longer than 10 s.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": { "Timer": { "mode": "On" } }, "var": { "kind": "TimerIec", "index": 1, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": ["10000"] }
+      ]
+    },
+    {
+      "id": 9,
+      "label": "fault",
+      "comment": "Latched rotation fault %Q4 stops the motor until the next change.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "TimerIec", "index": 1, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 4, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] }
+      ]
+    }
+  ],
+  "symbols": [
+    { "name": "gray_a", "var": { "kind": "PhysIn", "index": 0, "index_expr": null, "accessor": null }, "comment": "Position Gray bit 0 (LSB)", "unit": null },
+    { "name": "gray_b", "var": { "kind": "PhysIn", "index": 1, "index_expr": null, "accessor": null }, "comment": "Position Gray bit 1", "unit": null },
+    { "name": "gray_c", "var": { "kind": "PhysIn", "index": 2, "index_expr": null, "accessor": null }, "comment": "Position Gray bit 2 (MSB)", "unit": null },
+    { "name": "clamped", "var": { "kind": "PhysIn", "index": 3, "index_expr": null, "accessor": null }, "comment": "Clamp sensor: TRUE while clamped", "unit": null },
+    { "name": "requested", "var": { "kind": "PhysInWord", "index": 0, "index_expr": null, "accessor": null }, "comment": "Requested tool T0-T7", "unit": null },
+    { "name": "motor", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null }, "comment": "Turret rotation motor", "unit": null },
+    { "name": "reverse", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "accessor": null }, "comment": "Direction: TRUE is reverse", "unit": null },
+    { "name": "unclamp", "var": { "kind": "PhysOut", "index": 2, "index_expr": null, "accessor": null }, "comment": "Unclamp solenoid", "unit": null },
+    { "name": "ready", "var": { "kind": "PhysOut", "index": 3, "index_expr": null, "accessor": null }, "comment": "Tool ready lamp", "unit": null },
+    { "name": "fault", "var": { "kind": "PhysOut", "index": 4, "index_expr": null, "accessor": null }, "comment": "Rotation fault lamp", "unit": null },
+    { "name": "position", "var": { "kind": "MemWord", "index": 1, "index_expr": null, "accessor": null }, "comment": "Decoded turret position T0-T7", "unit": null },
+    { "name": "distance", "var": { "kind": "MemWord", "index": 2, "index_expr": null, "accessor": null }, "comment": "Forward steps to the request", "unit": null }
+  ],
+  "simulation": {
+    "switches": [
+      {
+        "var": {
+          "kind": "PhysIn",
+          "index": 0,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "gray_a",
+        "momentary": false
+      },
+      {
+        "var": {
+          "kind": "PhysIn",
+          "index": 1,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "gray_b",
+        "momentary": false
+      },
+      {
+        "var": {
+          "kind": "PhysIn",
+          "index": 2,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "gray_c",
+        "momentary": false
+      },
+      {
+        "var": {
+          "kind": "PhysIn",
+          "index": 3,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "clamped",
+        "momentary": false
+      }
+    ],
+    "lamps": [
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 0,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "motor"
+      },
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 1,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "reverse",
+        "colour": "Blue"
+      },
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 2,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "unclamp",
+        "colour": "Amber"
+      },
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 3,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "ready"
+      },
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 4,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "fault",
+        "colour": "Red"
+      }
+    ],
+    "analogs": [
+      {
+        "var": {
+          "kind": "PhysInWord",
+          "index": 0,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "requested tool",
+        "min": 0,
+        "max": 7,
+        "unit": ""
+      }
+    ],
+    "gauges": []
+  },
+  "scan": {
+    "period_ms": 10,
+    "input_period_ms": 10
+  }
+}
