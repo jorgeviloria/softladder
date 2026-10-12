@@ -107,6 +107,16 @@ pub fn import_bytes(bytes: &[u8]) -> Result<ImportReport, ProjectError> {
     import(&Document::parse(bytes)?)
 }
 
+/// Export template for `project`: its preserved passthrough parts, if any.
+///
+/// A native project imported from ClassicLadder carries the parts SoftLadder
+/// does not model in [`Project::extras`](softladder_core::Project::extras), so
+/// exporting against this template keeps them byte for byte without needing
+/// the original container at hand.
+pub fn template_for(project: &Project) -> Document {
+    Document::from_parts(project.extras.clone())
+}
+
 /// Exports `project` to container bytes, optionally gzip-compressed.
 ///
 /// # Errors
@@ -172,6 +182,47 @@ mod tests {
             Some("#VER=3.0\nPERIODIC_REFRESH=50\n")
         );
         assert_eq!(document.serialize(), text);
+    }
+
+    #[test]
+    fn unmodeled_parts_travel_inside_the_project() {
+        let text = concat!(
+            "_FILES_CLASSICLADDER\n",
+            "_FILE-general.txt\n",
+            "#VER=3.0\n",
+            "PERIODIC_REFRESH=50\n",
+            "_/FILE-general.txt\n",
+            "_FILE-spy_vars.csv\n",
+            "#VER=1.0\n",
+            "watch me\n",
+            "_/FILE-spy_vars.csv\n",
+            "_/FILES_CLASSICLADDER\n",
+        );
+        let report = import_bytes(text.as_bytes()).expect("imports");
+        assert!(
+            report.project.extras.iter().any(|(name, contents)| {
+                name == "spy_vars.csv" && contents == "#VER=1.0\nwatch me\n"
+            }),
+            "unmodeled parts travel inside the project: {:?}",
+            report.project.extras,
+        );
+        // Exporting against the project's own template keeps unmodeled parts
+        // byte for byte, with no original container at hand (regenerated parts
+        // like general.txt legitimately reflect the model instead).
+        let spy = |extras: &[(String, String)]| {
+            extras
+                .iter()
+                .find(|(name, _)| name == "spy_vars.csv")
+                .map(|(_, contents)| contents.clone())
+        };
+        let template = template_for(&report.project);
+        let second = export_bytes(&report.project, &template, false).expect("exports");
+        let back = import_bytes(&second).expect("re-imports");
+        assert_eq!(spy(&back.project.extras), spy(&report.project.extras));
+        assert_eq!(
+            spy(&back.project.extras).as_deref(),
+            Some("#VER=1.0\nwatch me\n")
+        );
     }
 
     #[test]

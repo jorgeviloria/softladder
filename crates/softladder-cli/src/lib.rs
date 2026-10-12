@@ -744,7 +744,10 @@ fn export_project(args: &ExportArgs) -> i32 {
     // A `.clprj*` argument is imported first (and used as its own template);
     // a native project starts from an empty document.
     let (project, template, mut diagnostics) = match native::load(&args.project) {
-        Ok(project) => (project, classicladder::Document::empty(), Vec::new()),
+        Ok(project) => {
+            let template = classicladder::template_for(&project);
+            (project, template, Vec::new())
+        }
         Err(error) => {
             if !is_classicladder_path(&args.project) {
                 eprintln!("error: cannot load `{}`: {error}", args.project.display());
@@ -1292,6 +1295,35 @@ mod tests {
         assert!(
             document.part("com_params.txt").is_some(),
             "the parts SoftLadder does not model are passed through"
+        );
+    }
+
+    #[test]
+    fn exporting_a_native_project_keeps_its_preserved_parts() {
+        use softladder_core::{Rung, Section};
+
+        let directory = TempDir::new();
+        let mut project = Project::new("with extras");
+        let mut section = Section::new(1, "Main");
+        section.rungs.push(1);
+        project.sections.push(section);
+        project.rungs.push(Rung::new(1));
+        project.extras = vec![("spy_vars.csv".to_owned(), "watch me\n".to_owned())];
+        let input = directory.path().join("with.slprj");
+        native::save(&project, &input).expect("saves");
+
+        let output = directory.path().join("with.clprj");
+        let args = ExportArgs {
+            project: input,
+            output: output.clone(),
+        };
+        assert_eq!(export_project(&args), EXIT_OK);
+        let document = classicladder::Document::parse(&std::fs::read(&output).expect("readable"))
+            .expect("the output is a container");
+        assert_eq!(
+            document.part("spy_vars.csv"),
+            Some("watch me\n"),
+            "preserved parts travel without the original container"
         );
     }
 

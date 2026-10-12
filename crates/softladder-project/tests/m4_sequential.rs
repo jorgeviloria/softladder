@@ -20,6 +20,17 @@ const CORPUS_TRANSITIONS: usize = 100;
 /// Pages imported across the whole corpus.
 const CORPUS_PAGES: usize = 8;
 
+/// Projects match when their models match: passthrough extras are transport
+/// metadata, compared separately from any fixed point.
+#[track_caller]
+fn assert_same_model(left: &Project, right: &Project, context: &str) {
+    let mut left = left.clone();
+    left.extras.clear();
+    let mut right = right.clone();
+    right.extras.clear();
+    assert_eq!(left, right, "{context}");
+}
+
 /// Directory holding the fetched ClassicLadder example projects.
 fn corpus_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -280,9 +291,10 @@ fn the_sequential_corpus_imports_executes_and_round_trips() {
             Ok(document) => classicladder::import(&document).expect("the export re-imports"),
             Err(error) => panic!("{name}: the export is not a container: {error}"),
         };
-        assert_eq!(
-            second_import.project, report.project,
-            "{name}: import -> export -> import is not a fixed point"
+        assert_same_model(
+            &second_import.project,
+            &report.project,
+            "{name}: import -> export -> import is not a fixed point",
         );
         let second = classicladder::export(&second_import.project, &second_import.extras)
             .expect("the second export succeeds");
@@ -297,9 +309,9 @@ fn the_sequential_corpus_imports_executes_and_round_trips() {
 
         // The imported chart runs without an error diagnostic. A host of
         // warnings (deprecated families, unmodelled parts) is expected, and
-        // some corpus projects still raise errors in their *ladder* sections
-        // (untranslated `=`-assignments, a known M3 gap), so the assertion is
-        // scoped to the diagnostics a sequential section raises.
+        // some corpus projects still raise errors in their *ladder* sections,
+        // so the assertion is scoped to the diagnostics a sequential section
+        // raises.
         let mut engine = softladder_core::ScanEngine::new(report.project.clone());
         for now in [0u64, 10, 20] {
             let scan = engine.scan_once(now);
@@ -370,7 +382,11 @@ fn a_page_no_section_references_is_kept_in_a_synthesized_section() {
     // And the synthesis survives the round trip.
     let exported = classicladder::export(&report.project, &report.extras).expect("export");
     let reimported = classicladder::import(&exported.document).expect("re-import");
-    assert_eq!(reimported.project, report.project);
+    assert_same_model(
+        &reimported.project,
+        &report.project,
+        "synthesis survives the round trip",
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -427,7 +443,11 @@ fn a_hand_built_chart_exports_cell_by_cell() {
     );
 
     let reimported = classicladder::import(&report.document).expect("the chart re-imports");
-    assert_eq!(reimported.project, project);
+    assert_same_model(
+        &reimported.project,
+        &project,
+        "a hand-built chart round-trips",
+    );
 }
 
 #[test]
@@ -548,7 +568,11 @@ fn a_page_with_nothing_but_an_empty_comment_is_not_a_page() {
     );
     let exported = classicladder::export(&report.project, &report.extras).expect("export");
     let reimported = classicladder::import(&exported.document).expect("reimport");
-    assert_eq!(reimported.project, report.project);
+    assert_same_model(
+        &reimported.project,
+        &report.project,
+        "an empty comment round-trips",
+    );
     assert_eq!(
         reimported
             .project
@@ -595,7 +619,11 @@ fn a_skipped_transition_keeps_the_round_trip_a_fixed_point() {
         .expect("the document renders");
     let second = classicladder::import(&Document::parse(&first_bytes).expect("container"))
         .expect("reimport");
-    assert_eq!(second.project, report.project);
+    assert_same_model(
+        &second.project,
+        &report.project,
+        "a skipped transition round-trips",
+    );
     let second_bytes =
         classicladder::export(&second.project, &second.extras).expect("second export");
     assert_eq!(

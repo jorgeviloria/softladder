@@ -398,6 +398,13 @@ pub struct Project {
     pub simulation: SimulationPanel,
     /// Scan timing configuration.
     pub scan: ScanConfig,
+    /// Opaque parts preserved across formats.
+    ///
+    /// ClassicLadder container parts SoftLadder does not model travel here, so
+    /// `import → save → export` keeps them byte for byte. Empty in authored
+    /// projects and skipped by the serializer then, so old files are untouched.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extras: Vec<(String, String)>,
 }
 
 /// Current project schema version.
@@ -423,6 +430,7 @@ impl Default for Project {
             symbols: Vec::new(),
             simulation: SimulationPanel::default(),
             scan: ScanConfig::default(),
+            extras: Vec::new(),
         }
     }
 }

@@ -99,6 +99,10 @@ The field order below is the order `serde` emits, and therefore the order that a
   absent (automatic sizing from the elements, as before). A declared size floors the sheet the
   editor draws — a fixed 12 × 8 rung draws exactly 12 × 8 — while the scan ignores the padding,
   so this is additive and `schema_version` stays 2.
+- `extras` carries ClassicLadder container parts SoftLadder does not model, as
+  `[name, contents]` pairs; skipped when empty, so authored projects are unchanged and
+  `schema_version` stays 2. It is what makes `import → save → export` preserve those parts
+  without the original container at hand.
 
 ### Accessors (schema v2)
 

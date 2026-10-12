@@ -1093,7 +1093,15 @@ impl EditorApp {
                 self.editor = editor;
                 self.after_load();
                 self.status = if imported {
-                    format!("imported {} — save to keep it", path.display())
+                    let preserved = self.editor.project().extras.len();
+                    if preserved > 0 {
+                        format!(
+                            "imported {} ({preserved} parts preserved as-is) — save to keep it",
+                            path.display()
+                        )
+                    } else {
+                        format!("imported {} — save to keep it", path.display())
+                    }
                 } else {
                     format!("opened {}", path.display())
                 };

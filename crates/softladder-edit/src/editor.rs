@@ -83,7 +83,14 @@ impl Editor {
         if extension == "clp" || extension == "clprj" || extension == "clprjz" {
             let report = classicladder::import_file(path)?;
             let mut editor = Self::new(report.project);
-            for diagnostic in report.diagnostics {
+            // Passthrough parts travel inside the project now, so their
+            // `SL-W032` notices would nag forever about nothing actionable;
+            // everything else merges into Problems.
+            for diagnostic in report
+                .diagnostics
+                .into_iter()
+                .filter(|diagnostic| diagnostic.code != "SL-W032")
+            {
                 push_unique(&mut editor.problems, diagnostic);
             }
             editor.path = None;
@@ -2287,29 +2294,57 @@ mod tests {
 
     #[test]
     fn opening_a_classicladder_project_imports_it_unsaved() {
-        use softladder_project::classicladder::{self, Document};
-
-        let mut imported = Project::new("legacy");
-        let mut section = Section::new(1, "Main");
-        section.rungs.push(1);
-        imported.sections.push(section);
-        imported.rungs.push(Rung::new(1));
-        let bytes = classicladder::export_bytes(&imported, &Document::empty(), false)
-            .expect("exports a container");
+        let container = concat!(
+            "_FILES_CLASSICLADDER\n",
+            "_FILE-general.txt\n",
+            "#VER=3.0\n",
+            "PERIODIC_REFRESH=50\n",
+            "_/FILE-general.txt\n",
+            "_FILE-spy_vars.csv\n",
+            "#VER=1.0\n",
+            "watch me\n",
+            "_/FILE-spy_vars.csv\n",
+            "_/FILES_CLASSICLADDER\n",
+        );
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join("legacy.clprj");
-        std::fs::write(&path, &bytes).expect("writes");
+        std::fs::write(&path, container).expect("writes");
 
-        let editor = Editor::open(&path).expect("classic opens");
-        assert_eq!(editor.project().rungs.len(), 1);
+        let mut editor = Editor::open(&path).expect("classic opens");
         assert!(editor.path().is_none());
         assert!(editor.is_dirty());
+        assert!(
+            editor
+                .project()
+                .extras
+                .iter()
+                .any(|(name, _)| name == "spy_vars.csv"),
+            "unmodeled parts travel inside the project",
+        );
+        assert!(
+            editor
+                .problems()
+                .iter()
+                .all(|diagnostic| diagnostic.code != "SL-W032"),
+            "passthrough notices are not Problems: {:?}",
+            editor.problems(),
+        );
+
+        // Saving and reopening keeps the passthrough parts byte for byte.
+        let saved = directory.path().join("legacy.slprj");
+        editor.save(&saved).expect("saves");
+        let reopened = Editor::open(&saved).expect("reopens");
+        assert_eq!(reopened.project().extras, editor.project().extras);
 
         // `.clp` is the legacy extension for the same container.
         let legacy = directory.path().join("legacy.clp");
-        std::fs::write(&legacy, &bytes).expect("writes");
+        std::fs::write(&legacy, container).expect("writes");
         let editor = Editor::open(&legacy).expect("legacy classic opens");
-        assert_eq!(editor.project().rungs.len(), 1);
+        assert!(editor
+            .project()
+            .extras
+            .iter()
+            .any(|(name, _)| name == "spy_vars.csv"));
 
         let missing = directory.path().join("plant.txt");
         assert!(Editor::open(&missing).is_err());

@@ -320,8 +320,15 @@ fn corpus_round_trip_is_a_fixed_point() {
             Ok(document) => classicladder::import(&document).expect("the export re-imports"),
             Err(error) => panic!("{name}: the export is not a container: {error}"),
         };
+        // The model is the fixed point; the passthrough template normalizes
+        // regenerated parts (general.txt, project_infos.txt) across the loop,
+        // so it compares separately from the project below.
+        let mut first_project = report.project.clone();
+        first_project.extras.clear();
+        let mut second_project = second_import.project.clone();
+        second_project.extras.clear();
         assert_eq!(
-            second_import.project, report.project,
+            second_project, first_project,
             "{name}: import → export → import is not a fixed point"
         );
 

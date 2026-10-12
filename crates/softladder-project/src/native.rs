@@ -298,6 +298,18 @@ mod tests {
     }
 
     #[test]
+    fn extras_skip_the_file_when_empty_and_round_trip_when_set() {
+        let text = to_json(&sample_project()).expect("serializes");
+        let document: Value = serde_json::from_str(&text).expect("valid json");
+        assert!(document.get("extras").is_none());
+
+        let mut project = sample_project();
+        project.extras = vec![("spy_vars.csv".to_owned(), "watch me\n".to_owned())];
+        let back = from_json(&to_json(&project).expect("serializes")).expect("deserializes");
+        assert_eq!(back.extras, project.extras);
+    }
+
+    #[test]
     fn saved_json_carries_the_current_schema_version() {
         let mut project = sample_project();
         project.schema_version = 1;

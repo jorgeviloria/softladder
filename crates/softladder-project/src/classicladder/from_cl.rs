@@ -36,6 +36,9 @@ const DEFAULT_REGISTER_CAPACITY: i64 = 500;
 pub(crate) fn import(document: &Document) -> Result<ImportReport, ProjectError> {
     let mut importer = Importer::new(document);
     importer.run();
+    // The project carries its own passthrough parts, so saving and exporting
+    // later need no sidecar: `import → save → export` preserves them.
+    importer.project.extras = importer.extras.clone();
     Ok(ImportReport {
         project: importer.project,
         diagnostics: importer.diagnostics,
