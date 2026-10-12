@@ -2875,6 +2875,10 @@ pub fn lint(project: &Project) -> Vec<Diagnostic> {
             let mut seen: Vec<(u8, u8)> = Vec::new();
             let mut live_rows: Vec<u8> = Vec::new();
             let mut has_left_rail: Vec<u8> = Vec::new();
+            // Leftmost placed cell of each live row with whether it is wired
+            // upwards: the gate everything right of it is fed through, so a
+            // row whose first cell is linked is fed when the row above is.
+            let mut first_cell: Vec<(u8, u8, bool)> = Vec::new();
 
             for element in &rung.elements {
                 if seen.contains(&(element.col, element.row)) {
@@ -2899,6 +2903,24 @@ pub fn lint(project: &Project) -> Vec<Diagnostic> {
                 if element.col == 0 && !has_left_rail.contains(&element.row) {
                     has_left_rail.push(element.row);
                 }
+                match first_cell
+                    .iter_mut()
+                    .find(|(row, _, _)| *row == element.row)
+                {
+                    Some((_, min_col, linked)) => {
+                        if element.col < *min_col {
+                            *min_col = element.col;
+                            *linked = element.col != 0 && element.connected_with_top;
+                        } else if element.col == *min_col {
+                            *linked &= element.connected_with_top;
+                        }
+                    }
+                    None => first_cell.push((
+                        element.row,
+                        element.col,
+                        element.col != 0 && element.connected_with_top,
+                    )),
+                }
 
                 for (code, message) in check_element(project, section, element, &subroutines) {
                     diagnostics.push(context(
@@ -2909,8 +2931,10 @@ pub fn lint(project: &Project) -> Vec<Diagnostic> {
                 }
             }
 
-            for row in live_rows {
-                if !has_left_rail.contains(&row) {
+            for row in &live_rows {
+                if !has_left_rail.contains(row)
+                    && !fed_through_links(*row, &first_cell, &has_left_rail)
+                {
                     diagnostics.push(context(
                         Diagnostic::new(
                             Severity::Warning,
@@ -2929,6 +2953,28 @@ pub fn lint(project: &Project) -> Vec<Diagnostic> {
     }
 
     diagnostics
+}
+
+/// Whether a live row with no rail cell is still fed: its leftmost cell is
+/// wired upwards and the row above is fed, the way `state_on_left` merges link
+/// power into the first cell everything right of it flows through.
+fn fed_through_links(row: u8, first_cell: &[(u8, u8, bool)], railed: &[u8]) -> bool {
+    let mut current = row;
+    loop {
+        let Some((_, _, linked)) = first_cell.iter().find(|(at, _, _)| *at == current) else {
+            return false;
+        };
+        if !linked {
+            return false;
+        }
+        let Some(up) = current.checked_sub(1) else {
+            return false;
+        };
+        if railed.contains(&up) {
+            return true;
+        }
+        current = up;
+    }
 }
 
 /// Structural checks of one sequential (SFC) section.
@@ -5698,6 +5744,44 @@ mod tests {
             .collect();
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].rung, Some(0));
+    }
+
+    #[test]
+    fn lint_follows_vertical_links_before_crying_wolf() {
+        let linked_branch = |id| {
+            rung(
+                id,
+                vec![
+                    element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                    element(ElementKind::CoilOut, Some("%Q0"), 1, 0),
+                    linked(ElementKind::Connection, None, 1, 1),
+                ],
+            )
+        };
+        let diagnostics = lint(&single_section(vec![linked_branch(1)]));
+        let warnings: Vec<&Diagnostic> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "SL-W001")
+            .collect();
+        assert!(
+            warnings.is_empty(),
+            "a row wired upwards to a railed row is fed: {warnings:?}"
+        );
+
+        // A link to a floating row feeds nothing: both rows warn.
+        let dangling = rung(
+            2,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 2, 0),
+                linked(ElementKind::Connection, None, 2, 1),
+            ],
+        );
+        let diagnostics = lint(&single_section(vec![dangling]));
+        let warnings: Vec<&Diagnostic> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "SL-W001")
+            .collect();
+        assert_eq!(warnings.len(), 2);
     }
 
     #[test]

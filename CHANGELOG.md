@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`.clp` files did not open.** The legacy extension is the same container and the importer
   always accepted it — only the editor's filter and extension gate said no. Both take
   `.clp` now.
+- **`SL-W001` cried wolf on linked rows.** A row fed through a vertical link from a railed row
+  was flagged anyway; the lint now follows the first cell's link upwards, as the docs always
+  said. `3pumps` went from 9 warnings to 1 (a genuinely empty rung).
 
 ## [Unreleased] — open ClassicLadder, rung capacity, no drag-pan
 
