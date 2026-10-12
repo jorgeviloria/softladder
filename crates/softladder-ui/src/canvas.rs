@@ -1073,8 +1073,10 @@ fn paint_network(
     if selected {
         if let Some((col, row)) = frame.selected_cell {
             if let Some(element) = queries::element_at_cell(&network.rung, col, row) {
+                // The same cell the hover highlight and the ghost use, so the
+                // three outlines always agree with each other and the grid.
                 let span = queries::block_span(element.kind);
-                let cell = glyph_rect(span_cell(grid, element.col, element.row, span), view.zoom);
+                let cell = span_cell(grid, element.col, element.row, span);
                 painter.rect_stroke(
                     cell,
                     CornerRadius::same(RADIUS_PILL),

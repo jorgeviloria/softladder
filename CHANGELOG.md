@@ -95,6 +95,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   row now run as written. Rows with no flag read false; `%C0.V` stays variable-only. Closes
   divergence 1 (`testdata/known-divergences.md`); the timer's second-row `Running` output stays out.
 
+## [Unreleased] — one selection box, on the grid
+
+### Changed
+
+- **Hover, selection and ghost share one rectangle**: the full cell, so the three outlines always
+  agree with each other and the grid instead of hugging different boxes. Verified against the
+  headless screenshots pixel by pixel.
+
 ## [Unreleased] — the grid meets the components
 
 ### Changed
