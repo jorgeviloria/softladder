@@ -166,7 +166,8 @@ toggle, not a separate design.
   right-click menu offers *Insert contact before / after, Insert branch, Toggle vertical link,
   Delete, Cut, Copy, Paste, Go to tag*; `V` toggles the link; arrows move the selection; `Ctrl+Z/Y`
   undo/redo. The wheel scrolls between networks (`Shift` + wheel goes sideways); there is no
-  drag-pan, so the sheet never drifts under the pointer. Zoom with `Ctrl +/-`, `Ctrl/Cmd` + wheel
+  drag-pan, so the sheet never drifts under the pointer, and the scroll stops at the first and
+  last network instead of running onto empty paper. Zoom with `Ctrl +/-`, `Ctrl/Cmd` + wheel
   or `Ctrl+0`.
 * **Block pins**: a block in series has one rung input per row the engine reads on the left
   (`IN`; `R/LD/CU/CD`; `R/IN/OUT`) and a single flow-out on the right (`Q`, or `E` for a

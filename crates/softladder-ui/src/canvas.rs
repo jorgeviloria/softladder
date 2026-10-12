@@ -237,6 +237,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         networks.iter().map(|network| network.rung.id).collect(),
     );
     let fitted: Option<(usize, Vec<u32>)> = ui.ctx().data(|data| data.get_temp(fit_id));
+    let bounds = document_bounds(&networks, width);
     if fitted.as_ref() != Some(&key) || app.camera.is_default() {
         let base = paper.min + Vec2::splat(PAPER_PAD);
         let viewport = paper.shrink(PAPER_PAD);
@@ -244,17 +245,12 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             .selected_rung
             .and_then(|id| networks.iter().find(|network| network.rung.id == id))
             .map(|network| network.band());
-        app.camera = fit_camera(
-            document_bounds(&networks, width),
-            viewport,
-            base,
-            app.camera.zoom,
-            focus,
-        );
+        app.camera = fit_camera(bounds, viewport, base, app.camera.zoom, focus);
         ui.ctx().data_mut(|data| data.insert_temp(fit_id, key));
     }
 
     handle_wheel(app, ui, &response, paper);
+    app.camera = clamp_camera(paper, app.camera, &bounds);
     let view = View::new(paper, app.camera, pitch * app.camera.zoom);
     // Where each network's grid landed on screen this frame, so a test (or an
     // automation driving the real interface) can aim at a cell instead of at a
@@ -604,6 +600,60 @@ fn fit_camera(content: Rect, viewport: Rect, base: Pos2, zoom: f32, focus: Optio
         viewport.center().y - base.y - centre_y * zoom,
     );
     Camera { zoom, pan }
+}
+
+/// Clamps the camera to the created rungs: the wheel can move between networks
+/// but never onto empty paper past the first band, the last band or the sides.
+/// A document smaller than the window pins instead of drifting.
+fn clamp_camera(paper: Rect, camera: Camera, content: &Rect) -> Camera {
+    let viewport = paper.shrink(PAPER_PAD);
+    if !viewport.is_positive() || !viewport.width().is_finite() || !viewport.height().is_finite() {
+        return camera;
+    }
+    let zoom = layout::clamp_zoom(camera.zoom);
+    let base = paper.min + Vec2::splat(PAPER_PAD);
+    let viewport = paper.shrink(PAPER_PAD);
+    let pan = Vec2::new(
+        clamp_axis(
+            camera.pan.x,
+            viewport.left(),
+            viewport.right(),
+            content.left(),
+            content.right(),
+            base.x,
+            zoom,
+        ),
+        clamp_axis(
+            camera.pan.y,
+            viewport.top(),
+            viewport.bottom(),
+            content.top(),
+            content.bottom(),
+            base.y,
+            zoom,
+        ),
+    );
+    Camera {
+        zoom,
+        pan: if pan.is_finite() { pan } else { camera.pan },
+    }
+}
+
+/// Clamps one pan axis so the content edge never leaves the viewport behind:
+/// the near edge stops at the viewport's near edge, the far edge at the far
+/// one. When the content fits, both bounds agree on pinning it.
+fn clamp_axis(
+    pan: f32,
+    view_min: f32,
+    view_max: f32,
+    doc_min: f32,
+    doc_max: f32,
+    base: f32,
+    zoom: f32,
+) -> f32 {
+    let hi = view_min - base - doc_min * zoom;
+    let lo = view_max - base - doc_max * zoom;
+    pan.clamp(lo.min(hi), hi)
 }
 
 /// The screen mapping of the document: a pan/zoom camera over document points.
@@ -2400,6 +2450,43 @@ mod tests {
         };
         let glyph = expression_glyph(grid, &empty, 40, &empty.elements[0], 1.0);
         assert_eq!(glyph.right(), 96.0 * f32::from(MAX_EXPRESSION_COLS));
+    }
+
+    #[test]
+    fn clamping_keeps_the_scroll_on_created_rungs() {
+        // Content taller than the window: the top stops at the top, the
+        // bottom at the bottom, and the middle moves freely.
+        let paper = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let content = Rect::from_min_size(Pos2::ZERO, vec2(700.0, 2000.0));
+        let camera = Camera {
+            zoom: 1.0,
+            pan: Vec2::ZERO,
+        };
+        let clamped = clamp_camera(paper, camera, &content);
+        // Pinned top: pushing down does nothing, pulling up moves.
+        assert_eq!(clamped.pan.y, 0.0, "top edge holds");
+        let down = Camera {
+            zoom: 1.0,
+            pan: vec2(0.0, -500.0),
+        };
+        assert_eq!(clamp_camera(paper, down, &content).pan.y, -500.0);
+        // Past the last rung clamps: content bottom meets viewport bottom.
+        let far = Camera {
+            zoom: 1.0,
+            pan: vec2(0.0, -5000.0),
+        };
+        let clamped = clamp_camera(paper, far, &content);
+        assert_eq!(clamped.pan.y, 588.0 - 12.0 - 2000.0);
+
+        // Content that fits pins both ways: no empty paper anywhere.
+        let short = Rect::from_min_size(Pos2::ZERO, vec2(700.0, 200.0));
+        let drifted = Camera {
+            zoom: 1.0,
+            pan: vec2(90.0, -80.0),
+        };
+        let clamped = clamp_camera(paper, drifted, &short);
+        assert_eq!(clamped.pan.x, 0.0, "left edge holds");
+        assert_eq!(clamped.pan.y, 0.0, "top edge holds");
     }
 
     #[test]
