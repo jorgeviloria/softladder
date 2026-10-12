@@ -20,7 +20,10 @@
   ],
   "assertions": [
     {"cycle": 5, "var": "%Q1", "expected": false},
+    {"cycle": 5, "var": "%MW1", "expected": 1},
+    {"cycle": 5, "var": "%C0.V", "expected": 0},
     {"cycle": 35, "var": "%Q2", "expected": true},
+    {"cycle": 35, "var": "%MW1", "expected": 1},
     {"cycle": 37, "var": "%Q0", "expected": true},
     {"cycle": 38, "var": "%Q1", "expected": true},
     {"cycle": 38, "var": "%MW2", "expected": 3},

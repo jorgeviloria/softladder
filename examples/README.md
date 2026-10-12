@@ -156,10 +156,14 @@ arrival at the requested tool (`%I2`) and unclamped feedback (`%I3`):
 | 6–7 | Settled, arrived and clamped after 300 ms: the tool-ready lamp `%Q2`. |
 | 8–9 | Watchdog: `%TM1` trips `%Q3` when a rotation takes longer than 10 s. |
 
+Stations are T1–T8 everywhere it matters (`%MW1`): the counter itself counts pulses
+since index, so reset law holds it at 0 while parked and `%MW1` still reads 1 —
+there is no position 0.
+
 Play it on the bench: request a tool on the slider, open *unclamped*, drop the
 index, pulse *passing* once per station and raise *at_target* on arrival —
 then close *unclamped* and watch *ready*. `turret_hydraulic.sltest` scripts a
-change to T4 with 11 assertions:
+change to T4 with 14 assertions:
 
 ```console
 $ cargo run -p softladder-cli -- test examples/turret_hydraulic.slprj examples/turret_hydraulic.sltest
