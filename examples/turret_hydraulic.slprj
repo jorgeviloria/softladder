@@ -9,10 +9,19 @@
       "name": "Main",
       "language": "Ladder",
       "subroutine": null,
-      "rungs": [1, 2, 3, 4, 5, 6, 7, 8, 9]
+      "rungs": [10, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     }
   ],
   "rungs": [
+    {
+      "id": 10,
+      "label": "wrap_clear",
+      "comment": "Self reset on a full turn: at count 8 or more the counter clears back to 0 (station 1) before it counts, so a coincident pulse is counted from the cleared base instead of being swallowed.",
+      "elements": [
+        { "kind": "Compare", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%C0.V", ">=", "8"] },
+        { "kind": "Operate", "var": null, "col": 1, "row": 0, "connected_with_top": false, "params": ["%C0.V", "=", "0"] }
+      ]
+    },
     {
       "id": 1,
       "label": "count_passing",

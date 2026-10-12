@@ -33,7 +33,25 @@
     {"cycle": 99, "var": "%I1", "value": false},
     {"cycle": 100, "var": "%I0", "value": true},
     {"cycle": 100, "var": "%I2", "value": true},
-    {"cycle": 102, "var": "%I3", "value": false}
+    {"cycle": 102, "var": "%I3", "value": false},
+    {"cycle": 136, "var": "%I0", "value": false},
+    {"cycle": 136, "var": "%I2", "value": false},
+    {"cycle": 138, "var": "%I1", "value": true},
+    {"cycle": 139, "var": "%I1", "value": false},
+    {"cycle": 140, "var": "%I1", "value": true},
+    {"cycle": 141, "var": "%I1", "value": false},
+    {"cycle": 142, "var": "%I1", "value": true},
+    {"cycle": 143, "var": "%I1", "value": false},
+    {"cycle": 144, "var": "%I1", "value": true},
+    {"cycle": 145, "var": "%I1", "value": false},
+    {"cycle": 146, "var": "%I1", "value": true},
+    {"cycle": 147, "var": "%I1", "value": false},
+    {"cycle": 148, "var": "%I1", "value": true},
+    {"cycle": 149, "var": "%I1", "value": false},
+    {"cycle": 150, "var": "%I1", "value": true},
+    {"cycle": 151, "var": "%I1", "value": false},
+    {"cycle": 152, "var": "%I1", "value": true},
+    {"cycle": 153, "var": "%I1", "value": false}
   ],
   "assertions": [
     {"cycle": 5, "var": "%Q1", "expected": false},
@@ -52,12 +70,19 @@
     {"cycle": 85, "var": "%Q3", "expected": false},
     {"cycle": 93, "var": "%MW1", "expected": 6},
     {"cycle": 97, "var": "%MW1", "expected": 8},
-    {"cycle": 99, "var": "%C0.V", "expected": 8},
+    {"cycle": 98, "var": "%C0.V", "expected": 8},
+    {"cycle": 99, "var": "%C0.V", "expected": 0},
     {"cycle": 99, "var": "%MW1", "expected": 1},
     {"cycle": 101, "var": "%C0.V", "expected": 0},
     {"cycle": 101, "var": "%MW1", "expected": 1},
     {"cycle": 101, "var": "%Q1", "expected": false},
     {"cycle": 135, "var": "%Q2", "expected": true},
-    {"cycle": 135, "var": "%Q3", "expected": false}
+    {"cycle": 135, "var": "%Q3", "expected": false},
+    {"cycle": 152, "var": "%C0.V", "expected": 8},
+    {"cycle": 152, "var": "%MW1", "expected": 1},
+    {"cycle": 153, "var": "%C0.V", "expected": 0},
+    {"cycle": 153, "var": "%MW1", "expected": 1},
+    {"cycle": 185, "var": "%Q2", "expected": false},
+    {"cycle": 185, "var": "%Q3", "expected": false}
   ]
 }

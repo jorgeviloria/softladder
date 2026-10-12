@@ -163,12 +163,15 @@ there is no position 0.
 Play it on the bench: request a tool on the slider, open *unclamped*, drop the
 index, pulse *passing* once per station and raise *at_target* on arrival —
 then close *unclamped* and watch *ready*. A full turn wraps station 8 back to 1 on its
-own: the 8th pulse reads done with position 1, then the index clears the count.
-`turret_hydraulic.sltest` scripts a change to T4 plus the full turn home with 23 assertions:
+own: the `wrap_clear` rung runs first and clears the counter the scan after it reaches 8
+(a coincident pulse counts from the cleared base instead of being swallowed), so a missed
+index can never stall the cycle.
+`turret_hydraulic.sltest` scripts a change to T4, the full turn home and an index-free
+8-pulse wrap with 30 assertions:
 
 ```console
 $ cargo run -p softladder-cli -- test examples/turret_hydraulic.slprj examples/turret_hydraulic.sltest
-test: scenario="hydraulic turret changes with full-turn wrap" project="examples/turret_hydraulic.slprj" cycles=135 asserted=23 failures=0
+test: scenario="hydraulic turret changes with full-turn wrap" project="examples/turret_hydraulic.slprj" cycles=185 asserted=30 failures=0
 ```
 
 ## Writing your own
