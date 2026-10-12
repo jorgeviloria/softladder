@@ -366,6 +366,12 @@ fn menu_bar(app: &mut EditorApp, ui: &mut Ui) {
                 app.show_inspector = !app.show_inspector;
             }
             if ui
+                .selectable_label(app.show_bench, "Bench window")
+                .clicked()
+            {
+                app.show_bench = !app.show_bench;
+            }
+            if ui
                 .selectable_label(app.theme == crate::design::Theme::Dark, "Dark theme")
                 .clicked()
             {
@@ -379,7 +385,7 @@ fn menu_bar(app: &mut EditorApp, ui: &mut Ui) {
         ui.menu_button("Tools", |ui| {
             if ui.button("Simulation bench").clicked() {
                 ui.close_menu();
-                app.centre_tab = CentreTab::Bench;
+                app.show_bench = true;
             }
             if ui.button("Check the program").clicked() {
                 ui.close_menu();
@@ -446,7 +452,6 @@ pub fn centre(app: &mut EditorApp, ui: &mut Ui) {
             canvas::show(app, ui);
         }
         CentreTab::Tags => panels::tags::show(app, ui),
-        CentreTab::Bench => panels::bench::show(app, ui),
         CentreTab::Watch => panels::watch::show(app, ui),
         CentreTab::Problems => panels::problems::show(app, ui),
     }

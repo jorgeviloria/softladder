@@ -44,7 +44,7 @@ maintenance technician who has used one PLC brand expects to find.
 ├───────────────────────────────────────────────────────────────────────────────────────────┤
 │ ↶ ↷ │ 🗋 🗁 💾 💾+ │ [▶ Run] ⏭ ▤ │ ⊖ ⊕ ⛶ │ % ☾                            2 forced │  command bar
 ├──────────────────────┬────────────────────────────────────────────────────────────────────┤
-│ PROJECT              │ ‹Ladder: Main› ‹PLC tags› ‹Watch & force› ‹Bench› ‹Problems 2›      │  tabs
+│ PROJECT              │ ‹Ladder: Main› ‹PLC tags› ‹Watch & force› ‹Problems 2›             │  tabs
 │  ▾ SoftLadder PLC    ├────────────────────────────────────────────────────────────────────┤
 │    ▾ Program         │  Network 1   start_stop                                    ● ok    │
 │      ▾ Main          │  Start/stop with self-hold: %I0 starts, %I2 stops.                │
@@ -80,8 +80,9 @@ maintenance technician who has used one PLC brand expects to find.
   Family, name and shortcut letter are in the tooltip, and the armed tool is filled with the accent.
   The palette wraps to a second row on a narrow window and never clips.
 * **Centre**: tab bar + the active document. Tabs: one program tab per open section — **Ladder**, or
-  **SFC** while a chart section is open — plus **PLC tags**, **Watch & force**, **Bench**,
-  **Problems**. The menu shows the project name. A dirty document shows a dot; the tab closes with `×`.
+  **SFC** while a chart section is open — plus **PLC tags**, **Watch & force**,
+  **Problems**. The bench is not a tab: it floats over the document as a window, so the operator
+  screen stays visible while the program runs. The menu shows the project name. A dirty document shows a dot; the tab closes with `×`.
 * **Right**: optional secondary pane (cross-reference, tag usage) — off by default.
 * **Bottom**: dockable pane for Problems / Watch table / Cross-reference, collapsible, with the
   status bar underneath.
@@ -200,7 +201,8 @@ bench runs; values update in place.
 
 ## 8. Bench (the HMI view)
 
-Laid out like an operator screen, not a form. Every widget is a card of the same size, in a grid
+A floating window over the document — toggled from Tools, the View menu or the project tree —
+laid out like an operator screen, not a form. Every widget is a card of the same size, in a grid
 that wraps. A tag prefix shared by two or more widgets (`conveyor_run`, `conveyor_speed`) is a
 zone titled from that prefix; a name that shares no prefix stays with its role: Inputs, Outputs
 or Analog.

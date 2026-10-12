@@ -708,7 +708,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                                 == row.transition.map(crate::sfc::Selection::Transition)
                     }
                     Node::Tags => centre_tab == CentreTab::Tags,
-                    Node::Bench => centre_tab == CentreTab::Bench,
+                    Node::Bench => app.show_bench,
                     Node::Watch => centre_tab == CentreTab::Watch,
                     Node::Problems => centre_tab == CentreTab::Problems,
                     Node::Plc | Node::Program => false,
@@ -734,6 +734,8 @@ struct TreeRequest {
     /// A sequential element to open: its section, its page and what to select.
     select_sequential: Option<(usize, u32, Option<crate::sfc::Selection>)>,
     centre: Option<CentreTab>,
+    /// The Simulation node was clicked: float the bench window.
+    bench: bool,
     menu: Option<MenuChoice>,
     /// A variable dropped on the Watch row.
     dropped: Option<VarRef>,
@@ -810,6 +812,9 @@ impl TreeRequest {
         }
         if let Some(tab) = self.centre {
             app.centre_tab = tab;
+        }
+        if self.bench {
+            app.show_bench = true;
         }
         if let Some(var) = self.dropped {
             app.centre_tab = CentreTab::Watch;
@@ -944,7 +949,7 @@ fn draw_row(
                 }
             }
             Node::Tags => request.centre = Some(CentreTab::Tags),
-            Node::Bench => request.centre = Some(CentreTab::Bench),
+            Node::Bench => request.bench = true,
             Node::Watch => request.centre = Some(CentreTab::Watch),
             Node::Problems => request.centre = Some(CentreTab::Problems),
             Node::Program => request.centre = Some(CentreTab::Ladder),

@@ -1432,7 +1432,7 @@ mod tests {
     #[test]
     fn drawing_a_full_bench_and_an_empty_one_is_panic_free() {
         let mut app = EditorApp::new(project());
-        app.centre_tab = crate::app::CentreTab::Bench;
+        app.show_bench = true;
         crate::panels::test_frame(&ctx(), &mut app, TEST_SIZE);
         app.handle(crate::shortcuts::Action::RunStop);
         app.single_scan();
@@ -1462,11 +1462,11 @@ mod tests {
             unit: String::new(),
         });
         let mut odd = EditorApp::new(odd);
-        odd.centre_tab = crate::app::CentreTab::Bench;
+        odd.show_bench = true;
         crate::panels::test_frame(&ctx(), &mut odd, TEST_SIZE);
 
         let mut empty = EditorApp::new(Project::new("empty"));
-        empty.centre_tab = crate::app::CentreTab::Bench;
+        empty.show_bench = true;
         crate::panels::test_frame(&ctx(), &mut empty, TEST_SIZE);
     }
 

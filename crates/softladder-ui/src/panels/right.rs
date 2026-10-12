@@ -77,8 +77,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
                 crate::sfc::inspector(app, ui);
                 return;
             }
-            if app.centre_tab == crate::app::CentreTab::Bench && bench::selected_widget().is_some()
-            {
+            if app.show_bench && bench::selected_widget().is_some() {
                 bench_widget(app, ui);
                 return;
             }

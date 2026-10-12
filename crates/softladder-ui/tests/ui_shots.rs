@@ -622,7 +622,7 @@ fn shoot_the_editor() {
         });
         true
     });
-    app.show_document(CentreTab::Bench);
+    app.show_bench_window();
     app.handle(softladder_ui::shortcuts::Action::RunStop);
     softladder_ui::panels::bench::rehearse(&mut app, 40, Some(8));
     shoot(&mut app, size, &dir.join("03b-bench.png"));

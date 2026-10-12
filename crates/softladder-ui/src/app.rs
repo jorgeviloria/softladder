@@ -141,8 +141,6 @@ pub enum CentreTab {
     Ladder,
     /// The PLC tag table (the symbol table, promoted to a document).
     Tags,
-    /// The simulation bench, laid out like an operator screen.
-    Bench,
     /// The watch and force table.
     Watch,
     /// Diagnostics for the whole project.
@@ -151,10 +149,12 @@ pub enum CentreTab {
 
 impl CentreTab {
     /// Every tab, in the order they appear.
-    pub const ALL: [CentreTab; 5] = [
+    ///
+    /// The simulation bench is not a tab: it floats over the ladder as a
+    /// window, so the operator screen stays visible while the program runs.
+    pub const ALL: [CentreTab; 4] = [
         CentreTab::Ladder,
         CentreTab::Tags,
-        CentreTab::Bench,
         CentreTab::Watch,
         CentreTab::Problems,
     ];
@@ -164,7 +164,6 @@ impl CentreTab {
         match self {
             CentreTab::Ladder => "Ladder",
             CentreTab::Tags => "PLC tags",
-            CentreTab::Bench => "Bench",
             CentreTab::Watch => "Watch & force",
             CentreTab::Problems => "Problems",
         }
@@ -220,6 +219,8 @@ pub struct EditorApp {
     pub(crate) rung_rows_buffer: String,
     pub(crate) show_about: bool,
     pub(crate) show_shortcuts: bool,
+    /// Whether the simulation bench floats over the document.
+    pub(crate) show_bench: bool,
     pub(crate) status: String,
     pub(crate) last_scan_ms: f64,
     edit_target: Option<(u32, u8, u8)>,
@@ -275,6 +276,7 @@ impl EditorApp {
             rung_rows_buffer: String::new(),
             show_about: false,
             show_shortcuts: false,
+            show_bench: true,
             status: String::new(),
             last_scan_ms: 0.0,
             edit_target: None,
@@ -357,8 +359,14 @@ impl EditorApp {
         self.note("checked the program");
     }
 
-    /// Opens a centre document: the program, the tags, the bench, the watch
-    /// table or the diagnostics.
+    /// Floats the simulation bench over the document, so the operator screen
+    /// stays visible while the program runs.
+    pub fn show_bench_window(&mut self) {
+        self.show_bench = true;
+    }
+
+    /// Opens a centre document: the program, the tags, the watch table or the
+    /// diagnostics.
     ///
     /// The panels own these documents; this is the one entry point they need so
     /// that the headless screenshot harness can photograph each of them.
@@ -1227,6 +1235,18 @@ impl EditorApp {
                 .open(&mut self.show_shortcuts)
                 .show(ctx, panels::shortcuts::show);
         }
+        if self.show_bench {
+            let mut open = true;
+            egui::Window::new("Simulation bench")
+                .resizable(true)
+                .default_size(egui::vec2(560.0, 420.0))
+                .default_pos(egui::pos2(620.0, 48.0))
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    panels::bench::show(self, ui);
+                });
+            self.show_bench = open;
+        }
     }
 }
 
@@ -1902,6 +1922,8 @@ mod tests {
     fn a_click_on_the_canvas_places_the_armed_element() {
         let ctx = egui::Context::default();
         let mut app = EditorApp::new(project());
+        // The floating bench would swallow the synthetic click.
+        app.show_bench = false;
         frame(&mut app, &ctx, Vec::new());
         app.handle(Action::Pick(ElementKind::ContactNc));
         let pos = crate::canvas::cell_centre(&ctx, 1, 3, 0).expect("rung 1 is on screen");
@@ -1922,6 +1944,8 @@ mod tests {
     fn a_click_with_the_pointer_tool_only_selects() {
         let ctx = egui::Context::default();
         let mut app = EditorApp::new(project());
+        // The floating bench would swallow the synthetic click.
+        app.show_bench = false;
         app.handle(Action::Pick(ElementKind::ContactNo));
         app.place_at(4, 2);
         assert!(app.element_at(1, 4, 2).is_some());
@@ -1958,6 +1982,8 @@ mod tests {
         // path end to end: place, select, delete.
         let ctx = egui::Context::default();
         let mut app = EditorApp::new(project());
+        // The floating bench would swallow the synthetic click.
+        app.show_bench = false;
         frame(&mut app, &ctx, Vec::new());
         app.handle(Action::Pick(ElementKind::ContactNc));
 

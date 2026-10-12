@@ -69,6 +69,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   well-deserved `SL-W001`), and the `.sltest` example pulses `%I1` five times asserting
   `%C0.V` 1–5 and `%C0.D`.
 
+## [Unreleased] — the bench floats over the ladder
+
+### Changed
+
+- **The bench is a window, not a tab.** The simulation panel floats over the document (open by
+  default, toggled from Tools, the View menu or the project tree, closable with `×`) so the
+  operator screen stays visible while the ladder runs beside it.
+
 ## [Unreleased] — expression boxes show the whole text
 
 ### Changed

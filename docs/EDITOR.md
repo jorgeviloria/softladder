@@ -17,7 +17,7 @@ and a status bar of badges. [`UX.md`](UX.md) §3 has the full specification and 
 ├──────────────────────────────────────────────────────────────────────────────────┤
 │ ↶ ↷ │ New Open Save │ Run Step Fill │ − + 1:1 Addresses Dark │ NO NC TON CTU …  │
 ├──────────────────┬───────────────────────────────────────────┬───────────────────┤
-│ PROJECT          │ ‹Ladder› ‹PLC tags› ‹Bench› ‹Watch & force› ‹Problems›        │
+│ PROJECT          │ ‹Ladder› ‹PLC tags› ‹Watch & force› ‹Problems›                │
 │  traffic_light   ├───────────────────────────────────────────┤ INSPECTOR         │
 │   Program        │  Network 1   start_stop             ok    │  Element          │
 │    Main LAD      │  Start/stop with self-hold…               │  Contact NO       │
@@ -36,8 +36,9 @@ and a status bar of badges. [`UX.md`](UX.md) §3 has the full specification and 
   with a one-line comment and an error dot), then the PLC tags, the bench, the watch table and the
   problems. Clicking a rung selects it and opens the ladder; clicking a node opens that document.
 * **Centre** — the open document. **Ladder** draws the selected section as numbered networks;
-  **PLC tags** is the tag table; **Bench** is the simulation panel laid out as an operator screen;
-  **Watch & force** monitors and forces variables; **Problems** lists the diagnostics.
+  **PLC tags** is the tag table; **Watch & force** monitors and forces variables; **Problems** lists
+  the diagnostics. **Bench** floats over the document as the simulation panel laid out as an
+  operator screen (Tools menu, View menu or the project tree toggles it).
 * **Right** — the inspector: whatever is selected (an element, a rung, a section, a bench widget),
   with the tag field, its validation, the parameters, the vertical link and the related commands.
 * **Bottom** — the status bar: one mode pill (`SIM RUN`, `SIM SCAN`, `SIM STOP`, `FREEZE`, `LOAD`),
