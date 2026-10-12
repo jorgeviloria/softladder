@@ -9,14 +9,21 @@ use std::path::{Path, PathBuf};
 /// File extensions a SoftLadder project can use.
 pub const PROJECT_EXTENSIONS: [&str; 2] = ["slprj", "slprjz"];
 
+/// ClassicLadder containers the editor imports on open.
+pub const CLASSIC_EXTENSIONS: [&str; 2] = ["clprj", "clprjz"];
+
 /// Extension appended to a save path that carries none.
 pub const DEFAULT_EXTENSION: &str = "slprj";
 
 /// Asks the user for a project to open.
+///
+/// ClassicLadder containers are offered too: picking one imports it as an
+/// unsaved project, so saving asks for a native path.
 pub fn open_dialog() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .set_title("Open project")
         .add_filter("SoftLadder project", &PROJECT_EXTENSIONS)
+        .add_filter("ClassicLadder project", &CLASSIC_EXTENSIONS)
         .pick_file()
 }
 
@@ -116,5 +123,6 @@ mod tests {
     fn the_project_extensions_are_the_ones_the_loader_accepts() {
         assert!(PROJECT_EXTENSIONS.contains(&DEFAULT_EXTENSION));
         assert_eq!(PROJECT_EXTENSIONS.len(), 2);
+        assert_eq!(CLASSIC_EXTENSIONS, ["clprj", "clprjz"]);
     }
 }

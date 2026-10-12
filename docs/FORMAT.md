@@ -95,6 +95,10 @@ The field order below is the order `serde` emits, and therefore the order that a
   skipped when absent, so a ladder project's bytes are unchanged and `schema_version` stays 2. See
   [`ELEMENTS.md`](ELEMENTS.md) §Sequential for the model and [`SEMANTICS.md`](SEMANTICS.md) §4 for
   how the engine evolves it.
+- `rungs[].cols` / `rungs[].rows` carry a rung's declared grid capacity; both are skipped when
+  absent (automatic sizing from the elements, as before). A declared size floors the sheet the
+  editor draws — a fixed 12 × 8 rung draws exactly 12 × 8 — while the scan ignores the padding,
+  so this is additive and `schema_version` stays 2.
 
 ### Accessors (schema v2)
 

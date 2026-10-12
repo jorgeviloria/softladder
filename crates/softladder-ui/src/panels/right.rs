@@ -268,11 +268,13 @@ fn rung(app: &mut EditorApp, ui: &mut Ui) {
     let Some(id) = app.selected_rung else {
         return;
     };
-    let Some((label, comment, elements)) = app.project().rung(id).map(|rung| {
+    let Some((label, comment, elements, cols, rows)) = app.project().rung(id).map(|rung| {
         (
             rung.label.clone(),
             rung.comment.clone(),
             rung.elements.len(),
+            rung.cols,
+            rung.rows,
         )
     }) else {
         empty(ui, &app.tokens);
@@ -310,6 +312,15 @@ fn rung(app: &mut EditorApp, ui: &mut Ui) {
         ui.label(RichText::new(&comment).color(tokens.text));
     }
     property(ui, &tokens, "Elements", elements.to_string());
+    property(
+        ui,
+        &tokens,
+        "Grid",
+        match (cols, rows) {
+            (Some(cols), Some(rows)) => format!("{cols} × {rows}"),
+            _ => "auto".to_owned(),
+        },
+    );
 
     ui.add_space(SPACE_2);
     ui.horizontal_wrapped(|ui| {
@@ -320,6 +331,8 @@ fn rung(app: &mut EditorApp, ui: &mut Ui) {
         {
             app.rung_label_buffer = label;
             app.rung_comment_buffer = comment;
+            app.rung_cols_buffer = cols.map(|size| size.to_string()).unwrap_or_default();
+            app.rung_rows_buffer = rows.map(|size| size.to_string()).unwrap_or_default();
             app.rung_text_target = Some(id);
         }
         if ui

@@ -478,14 +478,24 @@ fn read_networks(app: &EditorApp, painter: &Painter, tokens: &Tokens) -> Vec<Net
                 .clamp(1, 6)
         };
         // The grid is what the user can point at, so it always offers room to
-        // place an element: one empty row, and the columns the sheet has.
-        let rows = queries::rung_rows(rung)
-            .max(2)
-            .min(layout::MAX_ROW.saturating_add(1));
-        let cols = queries::rung_cols(rung)
-            .saturating_add(2)
-            .max(DOC_COLS)
-            .min(layout::MAX_COL.saturating_add(1));
+        // place an element: one empty row, and the columns the sheet has. A
+        // declared capacity is the sheet itself: no extra room is added, so a
+        // fixed 12 × 8 rung draws exactly 12 × 8.
+        let rows = if rung.rows.is_some() {
+            queries::rung_rows(rung).min(layout::MAX_ROW.saturating_add(1))
+        } else {
+            queries::rung_rows(rung)
+                .max(2)
+                .min(layout::MAX_ROW.saturating_add(1))
+        };
+        let cols = if rung.cols.is_some() {
+            queries::rung_cols(rung).min(layout::MAX_COL.saturating_add(1))
+        } else {
+            queries::rung_cols(rung)
+                .saturating_add(2)
+                .max(DOC_COLS)
+                .min(layout::MAX_COL.saturating_add(1))
+        };
         // The box of a counter is taller than the rows it reads: the pin grid
         // is padded. `lead` keeps that padding under the header and `tail`
         // keeps it above the next network's rule. A rung of contacts has
@@ -1877,6 +1887,16 @@ fn start_text_edit(
             EditField::Comment
         } else if rects.title.is_positive() && rects.title.contains(pos) {
             EditField::Title
+        app.rung_cols_buffer = network
+            .rung
+            .cols
+            .map(|size| size.to_string())
+            .unwrap_or_default();
+        app.rung_rows_buffer = network
+            .rung
+            .rows
+            .map(|size| size.to_string())
+            .unwrap_or_default();
         } else {
             continue;
         };

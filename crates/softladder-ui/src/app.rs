@@ -216,6 +216,8 @@ pub struct EditorApp {
     pub(crate) rung_text_target: Option<u32>,
     pub(crate) rung_label_buffer: String,
     pub(crate) rung_comment_buffer: String,
+    pub(crate) rung_cols_buffer: String,
+    pub(crate) rung_rows_buffer: String,
     pub(crate) show_about: bool,
     pub(crate) show_shortcuts: bool,
     pub(crate) status: String,
@@ -269,6 +271,8 @@ impl EditorApp {
             rung_text_target: None,
             rung_label_buffer: String::new(),
             rung_comment_buffer: String::new(),
+            rung_cols_buffer: String::new(),
+            rung_rows_buffer: String::new(),
             show_about: false,
             show_shortcuts: false,
             status: String::new(),
@@ -956,6 +960,39 @@ impl EditorApp {
         }
     }
 
+    /// Parses a rung size field: empty (or zero) means automatic.
+    pub(crate) fn parse_rung_size(text: &str) -> Result<Option<u8>, String> {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        match trimmed.parse::<u8>() {
+            Ok(0) => Ok(None),
+            Ok(size) => Ok(Some(size)),
+            Err(_) => Err(format!(
+                "`{trimmed}` is not a grid size (1–255, empty for auto)"
+            )),
+        }
+    }
+
+    /// Replaces a rung's grid capacity.
+    pub(crate) fn set_rung_size(&mut self, rung: u32, cols: Option<u8>, rows: Option<u8>) {
+        let cols = cols.filter(|size| *size > 0);
+        let rows = rows.filter(|size| *size > 0);
+        if self
+            .editor
+            .project()
+            .rung(rung)
+            .is_some_and(|target| target.cols == cols && target.rows == rows)
+        {
+            return;
+        }
+        match self.editor.set_rung_size(rung, cols, rows) {
+            Ok(()) => self.after_edit(),
+            Err(error) => self.note(&error.to_string()),
+        }
+    }
+
     /// Replaces a rung's label and comment.
     pub(crate) fn set_rung_text(&mut self, rung: u32, label: &str, comment: &str) {
         if self
@@ -1052,9 +1089,14 @@ impl EditorApp {
     pub(crate) fn open_path(&mut self, path: &Path) {
         match Editor::open(path) {
             Ok(editor) => {
+                let imported = editor.path().is_none();
                 self.editor = editor;
                 self.after_load();
-                self.status = format!("opened {}", path.display());
+                self.status = if imported {
+                    format!("imported {} — save to keep it", path.display())
+                } else {
+                    format!("opened {}", path.display())
+                };
             }
             Err(error) => self.note(&format!("open failed: {error}")),
         }
@@ -1216,6 +1258,15 @@ mod tests {
 
     fn var(text: &str) -> VarRef {
         text.parse().expect("test variable parses")
+    }
+
+    #[test]
+    fn rung_size_fields_parse_empty_zero_and_numbers() {
+        assert_eq!(EditorApp::parse_rung_size(""), Ok(None));
+        assert_eq!(EditorApp::parse_rung_size("  "), Ok(None));
+        assert_eq!(EditorApp::parse_rung_size("0"), Ok(None));
+        assert_eq!(EditorApp::parse_rung_size("12"), Ok(Some(12)));
+        assert!(EditorApp::parse_rung_size("wide").is_err());
     }
 
     #[test]

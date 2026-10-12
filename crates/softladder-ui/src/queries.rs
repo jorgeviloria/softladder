@@ -363,11 +363,15 @@ pub fn rung_rows(rung: &Rung) -> u8 {
         .map(|element| usize::from(element.row) + usize::from(block_span(element.kind)))
         .max()
         .unwrap_or(1)
-        .max(1);
+        .max(1)
+        .max(usize::from(rung.rows.unwrap_or(0)));
     u8::try_from(rows).unwrap_or(u8::MAX)
 }
 
 /// The columns a rung uses (the largest column plus one, at least one).
+///
+/// A declared capacity floors the grid: extra rows and columns hold no
+/// elements, so they draw empty and scan inert — they only reserve the sheet.
 pub fn rung_cols(rung: &Rung) -> u8 {
     rung.elements
         .iter()
@@ -375,6 +379,7 @@ pub fn rung_cols(rung: &Rung) -> u8 {
         .max()
         .unwrap_or(1)
         .max(1)
+        .max(usize::from(rung.cols.unwrap_or(0)))
         .try_into()
         .unwrap_or(u8::MAX)
 }
@@ -623,6 +628,21 @@ mod tests {
 
     fn var(text: &str) -> VarRef {
         text.parse().expect("test variable parses")
+    }
+
+    #[test]
+    fn a_declared_capacity_floors_the_grid() {
+        let mut rung = Rung::new(1);
+        assert_eq!((rung_cols(&rung), rung_rows(&rung)), (1, 1));
+        rung.cols = Some(12);
+        rung.rows = Some(8);
+        assert_eq!((rung_cols(&rung), rung_rows(&rung)), (12, 8));
+        rung.elements
+            .push(PlacedElement::new(ElementKind::ContactNo, 20, 0));
+        assert_eq!((rung_cols(&rung), rung_rows(&rung)), (21, 8));
+        rung.cols = None;
+        rung.rows = None;
+        assert_eq!((rung_cols(&rung), rung_rows(&rung)), (21, 1));
     }
 
     fn project() -> Project {

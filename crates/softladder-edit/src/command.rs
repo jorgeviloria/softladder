@@ -109,6 +109,18 @@ pub enum Command {
         /// New comment.
         comment: String,
     },
+    /// Replaces the rung's declared grid capacity.
+    ///
+    /// `None` sizes from the elements; `Some(n)` floors the sheet at `n`
+    /// columns or rows. A zero is normalized to `None` (automatic).
+    SetRungSize {
+        /// Id of the rung to edit.
+        rung: u32,
+        /// Declared columns, if fixed.
+        cols: Option<u8>,
+        /// Declared rows, if fixed.
+        rows: Option<u8>,
+    },
     /// Inserts a caller-provided rung at `index` in a section.
     InsertRung {
         /// Id of the section to edit.
@@ -311,6 +323,7 @@ impl Command {
             Command::SetElementKind { .. } => "change element kind",
             Command::SetVerticalLink { .. } => "set vertical link",
             Command::SetRungText { .. } => "edit rung text",
+            Command::SetRungSize { .. } => "edit rung size",
             Command::InsertRung { .. } => "insert rung",
             Command::DeleteRung { .. } => "delete rung",
             Command::MoveRung { .. } => "move rung",
@@ -420,6 +433,14 @@ mod tests {
                     comment: String::new(),
                 },
                 "edit rung text",
+            ),
+            (
+                Command::SetRungSize {
+                    rung: 1,
+                    cols: Some(12),
+                    rows: Some(8),
+                },
+                "edit rung size",
             ),
             (
                 Command::InsertRung {
@@ -583,6 +604,6 @@ mod tests {
             assert_eq!(label(command), *expected);
             assert!(!expected.is_empty());
         }
-        assert_eq!(commands.len(), 31, "one label per command variant");
+        assert_eq!(commands.len(), 32, "one label per command variant");
     }
 }

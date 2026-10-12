@@ -230,6 +230,18 @@ pub struct Rung {
     /// How empty cells behave in this rung; see [`WireMode`].
     #[serde(default)]
     pub wire_mode: WireMode,
+    /// Declared grid width, when the user fixed the rung's capacity.
+    ///
+    /// `None` sizes the rung from its elements; `Some(cols)` floors the grid
+    /// at `cols` columns (ClassicLadder's fixed 12 live here). The effective
+    /// width never drops below what the elements need. See [`Rung::cols`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cols: Option<u8>,
+    /// Declared grid height, when the user fixed the rung's capacity.
+    ///
+    /// Same contract as [`Rung::cols`] for rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rows: Option<u8>,
 }
 
 impl Rung {
@@ -471,6 +483,27 @@ mod tests {
             ["R", "IN", "OUT"]
         );
         assert_eq!(ElementKind::ContactNo.input_pins(), [] as [&str; 0]);
+    }
+
+    #[test]
+    fn rung_capacity_is_optional_and_omitted_when_automatic() {
+        let rung = Rung::new(1);
+        assert_eq!((rung.cols, rung.rows), (None, None));
+        let text = serde_json::to_string(&rung).expect("serializes");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("is JSON");
+        assert!(value.get("cols").is_none() && value.get("rows").is_none());
+
+        let legacy: Rung =
+            serde_json::from_str(r#"{"id":7,"label":"","comment":"","elements":[]}"#)
+                .expect("old rungs load without capacity");
+        assert_eq!((legacy.cols, legacy.rows), (None, None));
+
+        let mut sized = Rung::new(2);
+        sized.cols = Some(12);
+        sized.rows = Some(8);
+        let back: Rung = serde_json::from_str(&serde_json::to_string(&sized).expect("serializes"))
+            .expect("deserializes");
+        assert_eq!(back, sized);
     }
 
     #[test]

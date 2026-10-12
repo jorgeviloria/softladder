@@ -12,7 +12,7 @@ use softladder_core::{
     Section, SectionLanguage, SequentialPage, Severity, SimulationPanel, Step, Symbol, Transition,
     VarRef,
 };
-use softladder_project::native;
+use softladder_project::{classicladder, native};
 
 use crate::command::Command;
 use crate::error::EditError;
@@ -64,16 +64,43 @@ impl Editor {
         editor
     }
 
-    /// Opens a project file through `softladder_project::native`.
+    /// Opens a project file.
+    ///
+    /// `.slprj`/`.slprjz` load through `softladder_project::native`;
+    /// `.clprj`/`.clprjz` import through ClassicLadder and open as an unsaved
+    /// project (saving asks for a native path), with the import report merged
+    /// into the Problems list. Anything else is rejected by extension.
     ///
     /// Nothing is returned unless the file loaded completely, so a failed open
     /// never leaves a half-built editor behind.
     pub fn open(path: &Path) -> Result<Self, EditError> {
-        let project = native::load(path)?;
-        let mut editor = Self::new(project);
-        editor.path = Some(path.to_path_buf());
-        editor.dirty = false;
-        Ok(editor)
+        let extension = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if extension == "clprj" || extension == "clprjz" {
+            let report = classicladder::import_file(path)?;
+            let mut editor = Self::new(report.project);
+            for diagnostic in report.diagnostics {
+                push_unique(&mut editor.problems, diagnostic);
+            }
+            editor.path = None;
+            editor.dirty = true;
+            return Ok(editor);
+        }
+        if extension == "slprj" || extension == "slprjz" {
+            let project = native::load(path)?;
+            let mut editor = Self::new(project);
+            editor.path = Some(path.to_path_buf());
+            editor.dirty = false;
+            return Ok(editor);
+        }
+        Err(EditError::Project(
+            softladder_project::ProjectError::Container(format!(
+                "unsupported project extension `{extension}` (slprj, slprjz, clprj, clprjz)"
+            )),
+        ))
     }
 
     /// Saves the project to `path` and makes `path` the current file.
@@ -374,6 +401,18 @@ impl Editor {
             label: label.to_owned(),
             comment: comment.to_owned(),
         })
+    }
+
+    /// Fixes the rung's grid capacity (`None` sizes from the elements).
+    ///
+    /// A zero is normalized to `None` (automatic).
+    pub fn set_rung_size(
+        &mut self,
+        rung: u32,
+        cols: Option<u8>,
+        rows: Option<u8>,
+    ) -> Result<(), EditError> {
+        self.apply(Command::SetRungSize { rung, cols, rows })
     }
 
     /// Appends a fresh, empty section and returns its id.
@@ -990,6 +1029,22 @@ impl Editor {
                 let before = target.clone();
                 target.label = label.clone();
                 target.comment = comment.clone();
+                Ok(Edit::Rung {
+                    id: *rung,
+                    before,
+                    after: target.clone(),
+                })
+            }
+            Command::SetRungSize { rung, cols, rows } => {
+                let index = self.require_rung(*rung)?;
+                let target = self
+                    .project
+                    .rungs
+                    .get_mut(index)
+                    .ok_or(EditError::UnknownRung(*rung))?;
+                let before = target.clone();
+                target.cols = cols.filter(|size| *size > 0);
+                target.rows = rows.filter(|size| *size > 0);
                 Ok(Edit::Rung {
                     id: *rung,
                     before,
@@ -2200,6 +2255,57 @@ mod tests {
             },
         );
         assert!(matches!(error, EditError::NoSuchCell { .. }));
+    }
+
+    #[test]
+    fn set_rung_size_fixes_the_grid_and_undoes() {
+        let mut editor = editor();
+        let before = editor.project().clone();
+        editor.set_rung_size(1, Some(12), Some(8)).expect("sizes");
+        let target = editor.project().rung(1).expect("rung exists");
+        assert_eq!((target.cols, target.rows), (Some(12), Some(8)));
+        assert!(editor.undo());
+        assert_eq!(editor.project(), &before);
+
+        editor
+            .set_rung_size(1, Some(0), None)
+            .expect("zero is auto");
+        let target = editor.project().rung(1).expect("rung exists");
+        assert_eq!((target.cols, target.rows), (None, None));
+
+        let error = reject(
+            &mut editor,
+            Command::SetRungSize {
+                rung: 99,
+                cols: None,
+                rows: None,
+            },
+        );
+        assert!(matches!(error, EditError::UnknownRung(99)));
+    }
+
+    #[test]
+    fn opening_a_classicladder_project_imports_it_unsaved() {
+        use softladder_project::classicladder::{self, Document};
+
+        let mut imported = Project::new("legacy");
+        let mut section = Section::new(1, "Main");
+        section.rungs.push(1);
+        imported.sections.push(section);
+        imported.rungs.push(Rung::new(1));
+        let bytes = classicladder::export_bytes(&imported, &Document::empty(), false)
+            .expect("exports a container");
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("legacy.clprj");
+        std::fs::write(&path, bytes).expect("writes");
+
+        let editor = Editor::open(&path).expect("classic opens");
+        assert_eq!(editor.project().rungs.len(), 1);
+        assert!(editor.path().is_none());
+        assert!(editor.is_dirty());
+
+        let missing = directory.path().join("plant.txt");
+        assert!(Editor::open(&missing).is_err());
     }
 
     #[test]

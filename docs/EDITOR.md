@@ -57,6 +57,12 @@ Variable fields accept every ClassicLadder spelling (`%I0`, `%B3`, `%TM0.P`, `%C
 `%MW0.3`) and show the canonical form; autocompletion lists the variables and symbols already used in
 the project before inventing new ones.
 
+`File → Open` offers native projects and ClassicLadder containers (`.clprj`, `.clprjz`):
+picking a container imports it as an unsaved project, with the import report merged into
+Problems, so saving asks for a native path. A rung's sheet is automatic until the rung
+editor (label/comment dialog in the project tree) fixes its grid: empty Columns/Rows mean
+automatic, a number floors the sheet (a fixed 12 × 8 rung draws exactly 12 × 8).
+
 ## Keyboard
 
 | Shortcut | Action |

@@ -779,13 +779,18 @@ impl TreeRequest {
                 app.insert_rung(section, position)
             }
             Some(MenuChoice::EditRung(rung)) => {
-                if let Some((label, comment)) = app
-                    .project()
-                    .rung(rung)
-                    .map(|rung| (rung.label.clone(), rung.comment.clone()))
-                {
+                if let Some((label, comment, cols, rows)) = app.project().rung(rung).map(|rung| {
+                    (
+                        rung.label.clone(),
+                        rung.comment.clone(),
+                        rung.cols,
+                        rung.rows,
+                    )
+                }) {
                     app.rung_label_buffer = label;
                     app.rung_comment_buffer = comment;
+                    app.rung_cols_buffer = cols.map(|size| size.to_string()).unwrap_or_default();
+                    app.rung_rows_buffer = rows.map(|size| size.to_string()).unwrap_or_default();
                     app.rung_text_target = Some(rung);
                 }
             }
@@ -1197,7 +1202,10 @@ fn section_rename(app: &mut EditorApp, ui: &mut Ui) {
     }
 }
 
-/// The rung label/comment editor, drawn while an edit is in progress.
+/// The rung label/comment/size editor, drawn while an edit is in progress.
+///
+/// An empty grid field means automatic: the sheet grows from the elements. A
+/// number floors it, so a fixed 12 × 8 rung draws exactly 12 × 8.
 fn rung_editor(app: &mut EditorApp, ui: &mut Ui) {
     let Some(rung) = app.rung_text_target else {
         return;
@@ -1238,6 +1246,28 @@ fn rung_editor(app: &mut EditorApp, ui: &mut Ui) {
                             .desired_width(140.0),
                     );
                     ui.end_row();
+                    ui.label(
+                        RichText::new("Columns")
+                            .size(TypeScale::CAPTION)
+                            .color(tokens.text_dim),
+                    );
+                    ui.add(
+                        egui::TextEdit::singleline(&mut app.rung_cols_buffer)
+                            .desired_width(140.0)
+                            .hint_text("auto"),
+                    );
+                    ui.end_row();
+                    ui.label(
+                        RichText::new("Rows")
+                            .size(TypeScale::CAPTION)
+                            .color(tokens.text_dim),
+                    );
+                    ui.add(
+                        egui::TextEdit::singleline(&mut app.rung_rows_buffer)
+                            .desired_width(140.0)
+                            .hint_text("auto"),
+                    );
+                    ui.end_row();
                 });
             ui.horizontal(|ui| {
                 if ui.button("Save").clicked() {
@@ -1251,7 +1281,20 @@ fn rung_editor(app: &mut EditorApp, ui: &mut Ui) {
     if commit {
         let label = app.rung_label_buffer.clone();
         let comment = app.rung_comment_buffer.clone();
+        let cols = app.rung_cols_buffer.clone();
+        let rows = app.rung_rows_buffer.clone();
+        let (cols, rows) = match (
+            EditorApp::parse_rung_size(&cols),
+            EditorApp::parse_rung_size(&rows),
+        ) {
+            (Ok(cols), Ok(rows)) => (cols, rows),
+            (Err(error), _) | (_, Err(error)) => {
+                app.note(&error);
+                return;
+            }
+        };
         app.set_rung_text(rung, &label, &comment);
+        app.set_rung_size(rung, cols, rows);
         app.rung_text_target = None;
     } else if cancel {
         app.rung_text_target = None;
