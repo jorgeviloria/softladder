@@ -47,6 +47,8 @@ pub enum VarKind {
     PhysOutWord,
     /// IEC timer instance (`%TM`).
     TimerIec,
+    /// PID loop instance (`%PID`).
+    Pid,
     /// Counter instance (`%C`).
     Counter,
     /// Register / FIFO–LIFO stack (`%R`).
@@ -66,12 +68,13 @@ pub enum VarKind {
 /// a malformed reference such as `%I3.P` can never reach the scan engine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Accessor {
-    /// `.V` — current value of a timer or counter, or the age of an SFC step.
+    /// `.V` — current value of a timer or counter, process value of a PID loop,
+    /// or the age of an SFC step.
     Value,
-    /// `.P` — preset of a timer or counter.
+    /// `.P` — preset of a timer or counter, setpoint of a PID loop.
     Preset,
-    /// `.Q` / `.D` — output (timer) or done bit (counter). This is also the
-    /// meaning of a bare `%TM0` / `%C0`.
+    /// `.Q` / `.D` — output (timer), done bit (counter) or enabled flag (PID
+    /// loop). This is also the meaning of a bare `%TM0` / `%C0` / `%PID0`.
     Done,
     /// `.E` — empty flag of a counter or register.
     Empty,
@@ -79,7 +82,7 @@ pub enum Accessor {
     Full,
     /// `.I` — value pushed into a register.
     In,
-    /// `.O` — value popped out of a register.
+    /// `.O` — value popped out of a register, control output of a PID loop.
     Out,
     /// `.S` — number of values currently stored in a register.
     Count,
@@ -135,6 +138,7 @@ fn accessor_letter(kind: VarKind, accessor: Accessor) -> Option<char> {
 /// Prefix spellings accepted when parsing, longest first.
 const PREFIXES: &[(&str, VarKind)] = &[
     ("QLED", VarKind::Led),
+    ("PID", VarKind::Pid),
     ("IW", VarKind::PhysInWord),
     ("QW", VarKind::PhysOutWord),
     ("MW", VarKind::MemWord),
@@ -161,6 +165,7 @@ impl VarKind {
             VarKind::PhysInWord => "IW",
             VarKind::PhysOutWord => "QW",
             VarKind::TimerIec => "TM",
+            VarKind::Pid => "PID",
             VarKind::Counter => "C",
             VarKind::Register => "R",
             VarKind::Step => "X",
@@ -177,6 +182,7 @@ impl VarKind {
                 | VarKind::PhysIn
                 | VarKind::PhysOut
                 | VarKind::TimerIec
+                | VarKind::Pid
                 | VarKind::Counter
                 | VarKind::Register
                 | VarKind::Step
@@ -197,22 +203,36 @@ impl VarKind {
     /// activity. Everything else has no implied accessor.
     pub fn default_accessor(self) -> Option<Accessor> {
         match self {
-            VarKind::TimerIec | VarKind::Counter => Some(Accessor::Done),
+            VarKind::TimerIec | VarKind::Counter | VarKind::Pid => Some(Accessor::Done),
             VarKind::Step => Some(Accessor::Activity),
             _ => None,
         }
     }
 
     /// `true` when `accessor` may be applied to this kind.
+    ///
+    /// A PID loop reuses the generic accessors with loop meaning: `.P` is the
+    /// setpoint, `.V` the measured process value, `.O` the control output and
+    /// `.Q` (or a bare `%PID<n>`) whether the loop is enabled.
     pub fn accepts_accessor(self, accessor: Accessor) -> bool {
         match accessor {
-            Accessor::Value => matches!(self, VarKind::TimerIec | VarKind::Counter | VarKind::Step),
-            Accessor::Preset => matches!(self, VarKind::TimerIec | VarKind::Counter),
-            Accessor::Done => matches!(self, VarKind::TimerIec | VarKind::Counter),
+            Accessor::Value => {
+                matches!(
+                    self,
+                    VarKind::TimerIec | VarKind::Counter | VarKind::Step | VarKind::Pid
+                )
+            }
+            Accessor::Preset => {
+                matches!(self, VarKind::TimerIec | VarKind::Counter | VarKind::Pid)
+            }
+            Accessor::Done => {
+                matches!(self, VarKind::TimerIec | VarKind::Counter | VarKind::Pid)
+            }
+            Accessor::Out => matches!(self, VarKind::Register | VarKind::Pid),
             Accessor::Empty | Accessor::Full => {
                 matches!(self, VarKind::Counter | VarKind::Register)
             }
-            Accessor::In | Accessor::Out | Accessor::Count => matches!(self, VarKind::Register),
+            Accessor::In | Accessor::Count => matches!(self, VarKind::Register),
             Accessor::Activity => matches!(self, VarKind::Step),
             Accessor::Bit(_) => matches!(
                 self,

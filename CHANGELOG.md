@@ -77,6 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default, toggled from Tools, the View menu or the project tree, closable with `×`) so the
   operator screen stays visible while the ladder runs beside it.
 
+## [Unreleased] — PID loops in the engine (M9, slice one)
+
+### Added
+
+- **`Pid` control block (engine only).** One enable row, gains and period from parameters,
+  `%PID<n>.P`/`.V`/`.O` for setpoint/process/output and bare `%PID<n>` for enabled: positional
+  PID on a fixed sample time, bumpless start, frozen output while disabled, anti-windup into
+  `i32` range. The editor drawing, palette and ClassicLadder mapping are the next slice.
+
 ## [Unreleased] — the counter spells like ClassicLadder
 
 ### Changed

@@ -269,6 +269,35 @@ continues with the call's output = `input`. `params[0]` is the subroutine number
 (`Section::subroutine`). A missing subroutine produces `SL-E007` and is ignored. The call stack is
 limited to 25 frames; exceeding it produces `SL-E008`, aborts the call and abandons the rung.
 
+### 3.10 PID loop (`Pid`)
+
+A PID block at `(col, row)` reads one input row:
+
+| Input | Row | Behaviour |
+| --- | --- | --- |
+| Enable | `row` | run while true; freeze the output while false |
+
+Gains and sample time are parameters: `params[0]` = `kp`, `params[1]` = `ki`, `params[2]` = `kd`
+(each a real number, missing or unparsable reads `0.0`) and `params[3]` = period in milliseconds
+(default 100, at least 1). Every enabled scan runs a positional PID with a fixed `dt`:
+
+```
+error    = SP - PV
+P        = kp · error
+integral = integral + ki · error · dt
+D        = kd · (error − prev_error) / dt
+output   = clamp(P + integral + D) into i32 range
+```
+
+with `SP = %PID<n>.P`, `PV = %PID<n>.V` and the result in `%PID<n>.O`, all engineering units as
+reals. The first enabled scan seeds `prev_error` with the error (no derivative kick); disabling
+freezes the output, clears the derivative history and holds the integrator, so re-enabling is
+bumpless. The integrator is clamped through the output (anti-windup). The rung continues with
+the enable, and a bare `%PID<n>` reads it.
+
+ClassicLadder has no PID block, so there is no reference behaviour to diverge from; the
+algorithm above *is* the specification.
+
 ## 4. Scan structure
 
 ```

@@ -391,6 +391,7 @@ pub fn short_name(kind: ElementKind) -> &'static str {
         ElementKind::Timer {
             mode: TimerMode::Off,
         } => "TOF timer",
+        ElementKind::Pid => "PID loop",
         ElementKind::Timer {
             mode: TimerMode::Pulse,
         } => "TP timer",
@@ -436,6 +437,7 @@ pub fn default_var(kind: ElementKind, col: u8) -> Option<VarRef> {
         ElementKind::Timer { .. } => VarKind::TimerIec,
         ElementKind::Counter { .. } => VarKind::Counter,
         ElementKind::Register { .. } => VarKind::Register,
+        ElementKind::Pid => VarKind::Pid,
         ElementKind::CoilJump
         | ElementKind::CoilCall
         | ElementKind::Compare

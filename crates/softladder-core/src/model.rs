@@ -77,6 +77,8 @@ pub enum ElementKind {
         /// Timer flavour.
         mode: TimerMode,
     },
+    /// PID control loop block.
+    Pid,
     /// Counter block.
     Counter {
         /// Counter flavour.
@@ -124,7 +126,10 @@ impl ElementKind {
     pub fn is_block(self) -> bool {
         matches!(
             self,
-            ElementKind::Timer { .. } | ElementKind::Counter { .. } | ElementKind::Register { .. }
+            ElementKind::Timer { .. }
+                | ElementKind::Counter { .. }
+                | ElementKind::Register { .. }
+                | ElementKind::Pid
         )
     }
 
@@ -146,6 +151,7 @@ impl ElementKind {
             ElementKind::Timer { .. } => &["IN"],
             ElementKind::Counter { .. } => &["R", "P", "U", "D"],
             ElementKind::Register { .. } => &["R", "IN", "OUT"],
+            ElementKind::Pid => &["EN"],
             _ => &[],
         }
     }

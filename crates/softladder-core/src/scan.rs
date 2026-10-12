@@ -65,6 +65,8 @@ pub const DEFAULT_PHYS_INPUT_WORDS: usize = 25;
 pub const DEFAULT_PHYS_OUTPUT_WORDS: usize = 25;
 /// Default number of IEC timers (`%TM`).
 pub const DEFAULT_TIMERS: usize = 50;
+/// Default number of PID loops (`%PID`).
+pub const DEFAULT_PIDS: usize = 16;
 /// Default number of counters (`%C`).
 pub const DEFAULT_COUNTERS: usize = 50;
 /// Default number of registers (`%R`).
@@ -145,6 +147,29 @@ impl TimeBase {
             TimeBase::Minute60 => "1 min",
         }
     }
+}
+
+/// State of a PID control loop block.
+///
+/// `%PID<n>.P` is the setpoint, `%PID<n>.V` the measured process value and
+/// `%PID<n>.O` the control output, all engineering units as `f64`. Gains come
+/// from the element parameters, so only the running state lives here.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct PidState {
+    /// Setpoint (target).
+    pub setpoint: f64,
+    /// Measured process value.
+    pub process: f64,
+    /// Control output.
+    pub output: f64,
+    /// Accumulated integral term.
+    pub integral: f64,
+    /// Previous error, for the derivative term.
+    pub prev_error: f64,
+    /// Whether the loop has run at least once while enabled (bumpless start).
+    pub started: bool,
+    /// Whether the loop is currently enabled.
+    pub enabled: bool,
 }
 
 /// State of an IEC 61131-3 timer block.
@@ -695,6 +720,8 @@ pub struct VarStore {
     pub phys_out_words: Vec<i32>,
     /// IEC timer blocks (`%TM`).
     pub timers: Vec<TimerIec>,
+    /// PID loop blocks (`%PID`).
+    pub pids: Vec<PidState>,
     /// Counter blocks (`%C`).
     pub counters: Vec<Counter>,
     /// Register blocks (`%R`).
@@ -726,6 +753,7 @@ impl VarStore {
             phys_in_words: Vec::new(),
             phys_out_words: Vec::new(),
             timers: Vec::new(),
+            pids: Vec::new(),
             counters: Vec::new(),
             registers: Vec::new(),
             steps: Vec::new(),
@@ -745,6 +773,7 @@ impl VarStore {
             phys_in_words: vec![0; DEFAULT_PHYS_INPUT_WORDS],
             phys_out_words: vec![0; DEFAULT_PHYS_OUTPUT_WORDS],
             timers: vec![TimerIec::default(); DEFAULT_TIMERS],
+            pids: vec![PidState::default(); DEFAULT_PIDS],
             counters: vec![Counter::default(); DEFAULT_COUNTERS],
             registers: vec![RegisterState::default(); DEFAULT_REGISTERS],
             steps: vec![false; DEFAULT_STEPS],
@@ -786,6 +815,14 @@ impl VarStore {
             (VarKind::TimerIec, Some(Accessor::Preset)) => Some(Value::Word(clamp_u64_to_i32(
                 self.timers.get(index)?.preset,
             ))),
+            (VarKind::Pid, Some(Accessor::Done)) => Some(Value::Bit(self.pids.get(index)?.enabled)),
+            (VarKind::Pid, Some(Accessor::Value)) => {
+                Some(Value::Real(self.pids.get(index)?.process))
+            }
+            (VarKind::Pid, Some(Accessor::Preset)) => {
+                Some(Value::Real(self.pids.get(index)?.setpoint))
+            }
+            (VarKind::Pid, Some(Accessor::Out)) => Some(Value::Real(self.pids.get(index)?.output)),
             (VarKind::Counter, Some(Accessor::Done)) => {
                 Some(Value::Bit(self.counters.get(index)?.done()))
             }
@@ -875,6 +912,34 @@ impl VarStore {
                 timer.set_preset(clamp_i64_to_u64(value.as_i64()));
                 Ok(())
             }
+            (VarKind::Pid, Some(Accessor::Done)) => {
+                let Some(pid) = pid_slot(&mut self.pids, index, var)? else {
+                    return Ok(());
+                };
+                pid.enabled = value.as_bool();
+                Ok(())
+            }
+            (VarKind::Pid, Some(Accessor::Value)) => {
+                let Some(pid) = pid_slot(&mut self.pids, index, var)? else {
+                    return Ok(());
+                };
+                pid.process = value.as_f64();
+                Ok(())
+            }
+            (VarKind::Pid, Some(Accessor::Preset)) => {
+                let Some(pid) = pid_slot(&mut self.pids, index, var)? else {
+                    return Ok(());
+                };
+                pid.setpoint = value.as_f64();
+                Ok(())
+            }
+            (VarKind::Pid, Some(Accessor::Out)) => {
+                let Some(pid) = pid_slot(&mut self.pids, index, var)? else {
+                    return Ok(());
+                };
+                pid.output = value.as_f64();
+                Ok(())
+            }
             (VarKind::Counter, Some(Accessor::Done)) => {
                 let Some(counter) = counter_slot(&mut self.counters, index, var)? else {
                     return Ok(());
@@ -946,6 +1011,11 @@ impl VarStore {
         self.counters.get_mut(index)
     }
 
+    /// Mutable access to a PID loop by index.
+    pub fn pid_mut(&mut self, index: usize) -> Option<&mut PidState> {
+        self.pids.get_mut(index)
+    }
+
     /// Mutable access to a register block by index.
     pub fn register_mut(&mut self, index: usize) -> Option<&mut RegisterState> {
         self.registers.get_mut(index)
@@ -982,6 +1052,7 @@ impl VarStore {
             VarKind::PhysInWord => grow(&mut self.phys_in_words, needed, 0),
             VarKind::PhysOutWord => grow(&mut self.phys_out_words, needed, 0),
             VarKind::TimerIec => grow(&mut self.timers, needed, TimerIec::default()),
+            VarKind::Pid => grow(&mut self.pids, needed, PidState::default()),
             VarKind::Counter => grow(&mut self.counters, needed, Counter::default()),
             VarKind::Register => grow(&mut self.registers, needed, RegisterState::default()),
             VarKind::Step => {
@@ -1091,6 +1162,19 @@ fn counter_slot<'a>(
         return Err(StoreError::OutOfRange(var.clone()));
     }
     grow(slots, index + 1, Counter::default());
+    Ok(slots.get_mut(index))
+}
+
+/// Returns a mutable PID slot, growing the vector up to [`MAX_GROWTH`].
+fn pid_slot<'a>(
+    slots: &'a mut Vec<PidState>,
+    index: usize,
+    var: &VarRef,
+) -> Result<Option<&'a mut PidState>, StoreError> {
+    if index >= MAX_GROWTH {
+        return Err(StoreError::OutOfRange(var.clone()));
+    }
+    grow(slots, index + 1, PidState::default());
     Ok(slots.get_mut(index))
 }
 
@@ -1934,6 +2018,7 @@ impl Machine<'_> {
                     ElementKind::Timer { .. } => VarKind::TimerIec,
                     ElementKind::Counter { .. } => VarKind::Counter,
                     ElementKind::Register { .. } => VarKind::Register,
+                    ElementKind::Pid => VarKind::Pid,
                     _ => var.kind,
                 };
                 if var.kind != expected {
@@ -1961,6 +2046,12 @@ impl Machine<'_> {
         let outputs: [Option<bool>; 4] = match element.kind {
             ElementKind::Timer { mode } => [
                 Some(self.update_timer(element, block, mode, inputs[0])),
+                None,
+                None,
+                None,
+            ],
+            ElementKind::Pid => [
+                Some(self.update_pid(element, block, inputs[0])),
                 None,
                 None,
                 None,
@@ -2039,6 +2130,62 @@ impl Machine<'_> {
                     format!("counter {} is out of range", element_text(element)),
                 );
                 (false, false, false)
+            }
+        }
+    }
+
+    /// Runs one scan of a PID loop block.
+    ///
+    /// A positional PID on a fixed sample time: `output = kp·e + ∫ki·e + kd·de`,
+    /// with `dt` from the period parameter (default 100 ms, at least 1 ms).
+    /// While disabled the output freezes, the derivative history clears and the
+    /// integrator holds, so re-enabling is bumpless; the integrator is clamped
+    /// through the output (anti-windup) into `i32` range. Gains parse as `f64`,
+    /// missing or unparsable ones read `0.0`. Returns whether the loop runs.
+    fn update_pid(&mut self, element: &PlacedElement, block: &BlockCell, enable: bool) -> bool {
+        let number = |index: usize| {
+            element
+                .params
+                .get(index)
+                .and_then(|text| text.trim().parse::<f64>().ok())
+                .unwrap_or(0.0)
+        };
+        let (kp, ki, kd) = (number(0), number(1), number(2));
+        let period_ms = element
+            .params
+            .get(3)
+            .and_then(|text| text.trim().parse::<f64>().ok())
+            .filter(|period| period.is_finite() && *period > 0.0)
+            .unwrap_or(100.0);
+        let dt = (period_ms / 1000.0).max(0.001);
+        match self.store.pid_mut(block.index) {
+            Some(pid) => {
+                pid.enabled = enable;
+                if !enable {
+                    pid.started = false;
+                    return false;
+                }
+                let error = pid.setpoint - pid.process;
+                if !pid.started {
+                    pid.prev_error = error;
+                    pid.started = true;
+                }
+                let proportional = kp * error;
+                pid.integral += ki * error * dt;
+                let derivative = kd * (error - pid.prev_error) / dt;
+                pid.prev_error = error;
+                let output = (proportional + pid.integral + derivative)
+                    .clamp(f64::from(i32::MIN), f64::from(i32::MAX));
+                pid.integral = output - proportional - derivative;
+                pid.output = output;
+                true
+            }
+            None => {
+                self.error(
+                    "SL-E003",
+                    format!("PID loop {} is out of range", element_text(element)),
+                );
+                false
             }
         }
     }
@@ -2258,7 +2405,8 @@ impl Machine<'_> {
             // happen through `refresh`.
             ElementKind::Timer { .. }
             | ElementKind::Counter { .. }
-            | ElementKind::Register { .. } => input,
+            | ElementKind::Register { .. }
+            | ElementKind::Pid => input,
         }
     }
 
@@ -3185,6 +3333,14 @@ fn check_element(
                     found.push((
                         "SL-E003",
                         format!("register element needs a `%R` variable, found `{var}`"),
+                    ));
+                }
+            }
+            ElementKind::Pid => {
+                if var.kind != VarKind::Pid {
+                    found.push((
+                        "SL-E003",
+                        format!("PID element needs a `%PID` variable, found `{var}`"),
                     ));
                 }
             }
@@ -4520,6 +4676,103 @@ mod tests {
         assert_eq!(get(&engine, "%TM0.V"), Some(Value::Word(3)));
         assert_eq!(get(&engine, "%TM0"), Some(Value::Bit(true)));
         assert_eq!(get(&engine, "%Q0"), Some(Value::Bit(true)));
+    }
+
+    #[test]
+    fn pid_loop_is_proportional_integral_and_derivative() {
+        let mut engine = engine(vec![rung(
+            1,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                element_with(
+                    ElementKind::Pid,
+                    Some("%PID0"),
+                    1,
+                    0,
+                    &["2", "0.5", "1", "100"],
+                ),
+            ],
+        )]);
+        engine
+            .store_mut()
+            .set(&var("%PID0.P"), Value::Word(100))
+            .expect("setpoint can be set");
+        engine
+            .store_mut()
+            .set(&var("%PID0.V"), Value::Word(0))
+            .expect("process can be set");
+
+        let output = |engine: &ScanEngine| match get(engine, "%PID0.O") {
+            Some(Value::Real(value)) => value,
+            other => panic!("control output is real, got {other:?}"),
+        };
+        let close = |actual: f64, expected: f64| {
+            assert!(
+                (actual - expected).abs() < 1e-9,
+                "got {actual}, want {expected}"
+            );
+        };
+
+        // Disabled: frozen at zero, rung output false.
+        engine.scan_once(0);
+        close(output(&engine), 0.0);
+        assert_eq!(get(&engine, "%PID0"), Some(Value::Bit(false)));
+
+        // First enabled scan: no derivative kick, integral starts.
+        set_bit(&mut engine, "%I0", true);
+        engine.scan_once(10);
+        close(output(&engine), 2.0 * 100.0 + 0.5 * 100.0 * 0.1);
+        assert_eq!(get(&engine, "%PID0"), Some(Value::Bit(true)));
+
+        // Error held: the integral keeps accumulating, the derivative is quiet.
+        engine.scan_once(20);
+        close(output(&engine), 2.0 * 100.0 + 2.0 * 0.5 * 100.0 * 0.1);
+
+        // Process reaches the setpoint: proportional dies, derivative kicks.
+        engine
+            .store_mut()
+            .set(&var("%PID0.V"), Value::Word(100))
+            .expect("process can be set");
+        engine.scan_once(30);
+        close(output(&engine), 10.0 + 1.0 * (0.0 - 100.0) / 0.1);
+    }
+
+    #[test]
+    fn pid_loop_freezes_disabled_and_clamps_windup() {
+        let mut engine = engine(vec![rung(
+            1,
+            vec![
+                element(ElementKind::ContactNo, Some("%I0"), 0, 0),
+                element_with(
+                    ElementKind::Pid,
+                    Some("%PID0"),
+                    1,
+                    0,
+                    &["1", "1000000000000", "0", "100"],
+                ),
+            ],
+        )]);
+        engine
+            .store_mut()
+            .set(&var("%PID0.P"), Value::Word(10))
+            .expect("setpoint can be set");
+        set_bit(&mut engine, "%I0", true);
+        engine.scan_once(0);
+        let output = match get(&engine, "%PID0.O") {
+            Some(Value::Real(value)) => value,
+            other => panic!("control output is real, got {other:?}"),
+        };
+        assert_eq!(output, f64::from(i32::MAX));
+        assert!(output.is_finite());
+
+        // Disabling freezes the output where it was.
+        set_bit(&mut engine, "%I0", false);
+        engine.scan_once(10);
+        assert_eq!(
+            get(&engine, "%PID0.O"),
+            Some(Value::Real(f64::from(i32::MAX)))
+        );
+        assert_eq!(get(&engine, "%PID0"), Some(Value::Bit(false)));
     }
 
     #[test]

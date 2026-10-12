@@ -92,6 +92,7 @@ pub fn family_of(kind: ElementKind) -> Family {
         ElementKind::Timer { .. } => Family::Timers,
         ElementKind::Counter { .. } => Family::Counters,
         ElementKind::Register { .. } | ElementKind::Compare | ElementKind::Operate => Family::Data,
+        ElementKind::Pid => Family::Data,
     }
 }
 
@@ -113,9 +114,10 @@ pub fn short_label(kind: ElementKind) -> &'static str {
         ElementKind::CoilReset => "Reset",
         ElementKind::CoilJump => "Jump",
         ElementKind::CoilCall => "Call",
-        ElementKind::Timer { .. } | ElementKind::Counter { .. } | ElementKind::Register { .. } => {
-            ""
-        }
+        ElementKind::Timer { .. }
+        | ElementKind::Counter { .. }
+        | ElementKind::Register { .. }
+        | ElementKind::Pid => "",
         ElementKind::Compare => "CMP",
         ElementKind::Operate => "OPE",
         ElementKind::Connection => "Wire",

@@ -33,6 +33,17 @@ pub fn data_type(var: &VarRef) -> &'static str {
         },
         VarKind::Register => "Register",
         VarKind::Step => "Step",
+        VarKind::Pid => match var.accessor {
+            // Setpoint, process value and control output are reals; `%PID0`
+            // and `%PID0.Q` are the enabled bit, as the engine reads them.
+            Some(
+                softladder_core::Accessor::Value
+                | softladder_core::Accessor::Preset
+                | softladder_core::Accessor::Out,
+            ) => "Real",
+            Some(_) => "Bool",
+            None => "PID",
+        },
     }
 }
 

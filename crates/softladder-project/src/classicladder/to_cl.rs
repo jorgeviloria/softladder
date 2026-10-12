@@ -558,6 +558,12 @@ impl<'a> Exporter<'a> {
                 cell.etype = mapping::ELE_REGISTER;
                 cell.var_num = i64::from(index);
             }
+            ElementKind::Pid => {
+                self.warn(format!(
+                    "{where_}: PID loops have no ClassicLadder equivalent; the block is dropped"
+                ));
+                return None;
+            }
             ElementKind::Compare => {
                 cell.etype = mapping::ELE_COMPAR;
                 cell.var_num = self.expression_index.get(&(rung.id, position)).copied()?;
@@ -1244,7 +1250,8 @@ impl Sizes {
                     .registers
                     .max(usize::try_from(needed).unwrap_or(usize::MAX));
             }
-            VarKind::Step => {}
+            // Steps and PID loops have no `SIZE_*` hint in the reference format.
+            VarKind::Step | VarKind::Pid => {}
         }
         if let Some(index) = var.index_expr.as_deref() {
             self.observe(index);
