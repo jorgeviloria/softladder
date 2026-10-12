@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — passthrough parts survive, quieter Problems
+
+### Added
+
+- **Unmodeled ClassicLadder parts travel inside the project.** `Project.extras` carries them
+  (skipped when empty, no schema bump), the importer fills it, native save/load keeps it, and
+  export falls back to it as the template — so `import → save → export` preserves them without
+  the original container. Passthrough `SL-W032` notices stay in the CLI import log but leave
+  the editor's Problems list, where they nagged forever about nothing actionable; the open
+  status names how many parts were preserved.
+
 ## [Unreleased] — operate `=` imports, `.clp` opens
 
 ### Fixed
