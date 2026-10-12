@@ -49,6 +49,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   well-deserved `SL-W001`), and the `.sltest` example pulses `%I1` five times asserting
   `%C0.V` 1–5 and `%C0.D`.
 
+## [Unreleased] — the ladder fills the window
+
+### Changed
+
+- **Adaptive column pitch.** The sheet fills the window: columns take their natural width while
+  it fits and shrink, never past tag-name readability, on narrower windows — instead of shrinking
+  the whole drawing with the zoom. Framing a section only moves the view now; the zoom stays
+  where the user left it.
+
 ## [Unreleased] — no sideways drift on the documents
 
 ### Changed

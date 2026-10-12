@@ -137,11 +137,15 @@ toggle, not a separate design.
 * **Element labels**: two lines, tag name above (13 px, `text`) and address below (11 px, monospace,
   `text_dim`). If a variable has no tag, only the address is shown. A View toggle switches to
   address-only.
+* **Sheet**: the ladder fills the window. Columns take their natural width while it fits and
+  shrink, never past tag-name readability, when the window narrows; framing only moves the view
+  (top of the section, or the selected network when it is taller) and never touches the zoom.
 * **Symbols** are drawn as schematics, not text boxes:
   * NO/NC contacts `-| |-` / `-|/|-` with proper gaps; rising/falling edges `-|P|-` / `-|N|-`.
   * Coils `-( )-`, negated `-(/)-`, set `-(S)-`, reset `-(R)-`, jump `-(J)-`, call `-(C)-`.
   * Function blocks are rectangles with the instance name above, the block type inside, and named
-    pins: timer `IN/PT → Q/ET`, counter `CU/CD/R/LD → Q/CV`, register `R/IN/OUT → E/F`.
+    pins: timer `IN → Q`, counter `R/LD/CU/CD → Q`, register `R/IN/OUT → E`. Readouts (`ET`, `CV`,
+    `F`) and parameters (`PT`, `PV`, `N`) are labels, not pins.
   * Compare and operate are boxes showing the expression, truncated with an ellipsis and a tooltip
     that shows it in full.
 * **Rails**: a left power rail, live while the bench is feeding the network, and a right return rail

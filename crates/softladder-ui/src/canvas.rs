@@ -34,10 +34,41 @@ use crate::symbols::{self, Style};
 ///
 /// Wider than [`layout::BASE_CELL_W`] because a cell carries its tag name: a
 /// vendor ladder is read by name, so a column has to be wide enough for one.
-/// The pointer is still resolved through [`layout`]'s mapping, over the same
-/// cells the canvas draws with — a screen test that drives a drag has to use
-/// this pitch times the camera zoom.
+/// This is the *natural* pitch, used when the window fits it; narrower windows
+/// shrink the pitch (never past [`MIN_COL_PITCH`]) instead of the zoom, so the
+/// sheet fills the window while the type stays readable. The pointer is still
+/// resolved through [`layout`]'s mapping, over the same cells the canvas draws
+/// with — a screen test that drives a drag has to use the adaptive pitch times
+/// the camera zoom (see [`col_pitch`]).
 pub(crate) const COL_PITCH: f32 = 96.0;
+
+/// Narrowest a grid column ever gets, in document points.
+///
+/// Below this the tag names collide; a still-narrower window clips instead,
+/// and `Shift` + wheel reaches the clipped columns.
+const MIN_COL_PITCH: f32 = 56.0;
+
+/// Breathing room past the last column: the return rail and a margin.
+///
+/// The adaptive pitch reserves this before dividing the window, so the return
+/// rail never lands on the paper's edge.
+const GRID_TAIL: f32 = 64.0;
+
+/// Column pitch in document points for `cols` columns on `paper`.
+///
+/// The sheet fills the window: columns take their natural width while it fits
+/// and shrink to [`MIN_COL_PITCH`] when it does not. Zoom still magnifies —
+/// it scales these points, not the window budget.
+pub(crate) fn col_pitch(paper: Rect, zoom: f32, cols: u8) -> f32 {
+    let cols = f32::from(cols.max(1));
+    let avail = (paper.width() - 2.0 * PAPER_PAD - GRID_LEFT - GRID_TAIL) / zoom.max(0.25);
+    (avail / cols).clamp(MIN_COL_PITCH, COL_PITCH)
+}
+
+/// Document width in points for `cols` columns at `pitch`.
+pub(crate) fn doc_width(pitch: f32, cols: u8) -> f32 {
+    GRID_LEFT + pitch * f32::from(cols.max(1)) + GRID_TAIL
+}
 
 /// Height of the glyph area of one cell, in document points.
 const GLYPH_H: f32 = 48.0;
@@ -116,16 +147,6 @@ const EMPTY_NETWORK_H: f32 = 124.0;
 /// a cell; the editor refuses a cell the model cannot hold.
 const DOC_COLS: u8 = ((DOC_WIDTH - GRID_LEFT) / COL_PITCH) as u8;
 
-/// Tallest zoom the automatic fit applies: a document is fitted, never magnified.
-const FIT_MAX_ZOOM: f32 = 1.0;
-
-/// Smallest zoom the automatic fit applies.
-///
-/// Fitting a long section into a small window would otherwise shrink the ladder
-/// until nothing is readable; below this the document is framed on the selected
-/// network instead and panned like every vendor tool.
-const FIT_MIN_ZOOM: f32 = 0.8;
-
 /// Key of the per-frame record of where every network's grid was drawn.
 const GRIDS_ID: &str = "softladder-canvas-grids";
 
@@ -178,7 +199,18 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         app.selected_rung = None;
         app.selection = None;
     }
-    let networks = read_networks(app, &painter, &tokens);
+    // The sheet fills the window: the pitch adapts to the paper before the
+    // networks are read, so every band, wire and hit-test shares it.
+    let max_cols = queries::section_rungs(app.project(), app.selected_section)
+        .into_iter()
+        .filter_map(|id| app.project().rung(id))
+        .map(queries::rung_cols)
+        .max()
+        .unwrap_or(1)
+        .max(1);
+    let pitch = col_pitch(paper, app.camera.zoom, max_cols);
+    let width = doc_width(pitch, max_cols);
+    let networks = read_networks(app, &painter, &tokens, width);
     if networks.is_empty() {
         empty_paper(
             app,
@@ -196,8 +228,9 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         return;
     }
 
-    // The document is fitted whenever the open section changes, so a project
-    // never opens at a random zoom with its ladder lost in a corner.
+    // The document is framed whenever the open section changes, so a project
+    // never opens with its ladder lost in a corner. Framing never touches the
+    // zoom: the pitch already fits the width, and the wheel owns the zoom.
     let fit_id = egui::Id::new("softladder-canvas-fit");
     let key: (usize, Vec<u32>) = (
         app.selected_section,
@@ -211,12 +244,18 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
             .selected_rung
             .and_then(|id| networks.iter().find(|network| network.rung.id == id))
             .map(|network| network.band());
-        app.camera = fit_camera(document_bounds(&networks), viewport, base, focus);
+        app.camera = fit_camera(
+            document_bounds(&networks, width),
+            viewport,
+            base,
+            app.camera.zoom,
+            focus,
+        );
         ui.ctx().data_mut(|data| data.insert_temp(fit_id, key));
     }
 
     handle_wheel(app, ui, &response, paper);
-    let view = View::new(paper, app.camera);
+    let view = View::new(paper, app.camera, pitch * app.camera.zoom);
     // Where each network's grid landed on screen this frame, so a test (or an
     // automation driving the real interface) can aim at a cell instead of at a
     // pixel that moves whenever the chrome around the canvas changes.
@@ -303,7 +342,7 @@ fn paint_paper(painter: &Painter, paper: Rect, tokens: &Tokens) {
 
 /// Draws the engineering grid on the paper, aligned with the document origin.
 fn paint_grid(painter: &Painter, paper: Rect, view: View, networks: &[Network], tokens: &Tokens) {
-    let cell = Vec2::new(COL_PITCH * view.zoom, ROW_PITCH * view.zoom);
+    let cell = Vec2::new(view.pitch, ROW_PITCH * view.zoom);
     if cell.x < 7.0 || cell.y < 7.0 || !cell.x.is_finite() || !cell.y.is_finite() {
         return;
     }
@@ -345,6 +384,8 @@ struct Network {
     rows: u8,
     /// Grid columns.
     cols: u8,
+    /// Document width, shared by every band so headers and rules align.
+    width: f32,
     /// Number of wrapped comment lines.
     comment_lines: usize,
     /// Space between the header and the first cell, in document points.
@@ -362,7 +403,7 @@ impl Network {
 
     /// The band as a document rectangle.
     fn band(&self) -> Rect {
-        Rect::from_min_size(Pos2::new(0.0, self.top), Vec2::new(DOC_WIDTH, self.height))
+        Rect::from_min_size(Pos2::new(0.0, self.top), Vec2::new(self.width, self.height))
     }
 
     /// Height of the header, in document points.
@@ -451,10 +492,10 @@ fn header_rects(header: Rect, has_title: bool, comment_lines: usize) -> HeaderRe
 }
 
 /// Reads every rung of the open section into the bands it is drawn in.
-fn read_networks(app: &EditorApp, painter: &Painter, tokens: &Tokens) -> Vec<Network> {
+fn read_networks(app: &EditorApp, painter: &Painter, tokens: &Tokens, width: f32) -> Vec<Network> {
     let ids = queries::section_rungs(app.project(), app.selected_section);
     let comment_font = FontId::new(TypeScale::CAPTION, FontFamily::Proportional);
-    let wrap = (DOC_WIDTH - SPACE_3 * 2.0).max(80.0);
+    let wrap = (width - SPACE_3 * 2.0).max(80.0);
     let mut networks = Vec::with_capacity(ids.len());
     let mut top = 0.0;
     for (index, id) in ids.iter().enumerate() {
@@ -515,6 +556,7 @@ fn read_networks(app: &EditorApp, painter: &Painter, tokens: &Tokens) -> Vec<Net
             height,
             rows,
             cols,
+            width,
             comment_lines,
             lead,
         });
@@ -524,45 +566,39 @@ fn read_networks(app: &EditorApp, painter: &Painter, tokens: &Tokens) -> Vec<Net
 }
 
 /// The bounding box of every network, in document points.
-fn document_bounds(networks: &[Network]) -> Rect {
+fn document_bounds(networks: &[Network], width: f32) -> Rect {
     let height = networks
         .last()
         .map_or(DOC_MIN_HEIGHT, |network| network.bottom())
         .max(DOC_MIN_HEIGHT);
-    Rect::from_min_size(Pos2::ZERO, Vec2::new(DOC_WIDTH, height))
+    Rect::from_min_size(Pos2::ZERO, Vec2::new(width, height))
 }
 
 /// The camera that frames a section in `viewport`, with the document origin at
 /// `base`.
 ///
-/// A section that fits is shown whole, centred, at `1.0` at most: a document is
-/// fitted to the window, not blown up until its symbols fill the screen. A
-/// section taller than the window is framed on `focus` (the selected network)
-/// at [`FIT_MIN_ZOOM`], the zoom below which a ladder stops being readable, and
-/// panned from there — which is what every vendor tool does with a long block.
-fn fit_camera(content: Rect, viewport: Rect, base: Pos2, focus: Option<Rect>) -> Camera {
-    if !content.is_positive()
-        || !viewport.is_positive()
-        || !content.width().is_finite()
-        || !content.height().is_finite()
-    {
-        return Camera::default();
+/// Framing only ever moves the camera: the sheet fills the window through its
+/// adaptive pitch (see [`col_pitch`]), so the zoom stays exactly where the
+/// user left it. A section that fits starts at the top of the page, the way a
+/// document does; a taller one is framed on `focus` (the selected network) and
+/// scrolled from there — which is what every vendor tool does with a long
+/// block. The document stays left-aligned: a narrow window shows the rail and
+/// the first columns rather than the middle of the network.
+fn fit_camera(content: Rect, viewport: Rect, base: Pos2, zoom: f32, focus: Option<Rect>) -> Camera {
+    let zoom = layout::clamp_zoom(zoom);
+    if !content.is_positive() || !viewport.is_positive() || !content.height().is_finite() {
+        return Camera {
+            zoom,
+            pan: Vec2::ZERO,
+        };
     }
-    let fitted = (viewport.width() / content.width())
-        .min(viewport.height() / content.height())
-        .min(FIT_MAX_ZOOM);
-    let zoom = layout::clamp_zoom(fitted.max(FIT_MIN_ZOOM));
     let half = viewport.height() / (2.0 * zoom);
     let centre_y = if content.height() <= 2.0 * half {
-        // A document that fits starts at the top of the page, the way a
-        // document does, and the sheet below it stays empty.
         content.top() + half
     } else {
         let wanted = focus.map_or(content.center().y, |rect| rect.center().y);
         wanted.clamp(content.top() + half, content.bottom() - half)
     };
-    // The document is left-aligned against the sheet: a narrow window shows the
-    // rail and the first columns rather than the middle of the network.
     let pan = Vec2::new(
         viewport.left() - base.x - content.left() * zoom,
         viewport.center().y - base.y - centre_y * zoom,
@@ -577,14 +613,18 @@ struct View {
     origin: Pos2,
     /// Zoom factor.
     zoom: f32,
+    /// Column pitch in screen points, from [`col_pitch`].
+    pitch: f32,
 }
 
 impl View {
-    /// The view of `paper` under `camera`.
-    fn new(paper: Rect, camera: Camera) -> Self {
+    /// The view of `paper` under `camera`, with a `pitch` of screen points per
+    /// document column.
+    fn new(paper: Rect, camera: Camera, pitch: f32) -> Self {
         Self {
             origin: paper.min + Vec2::splat(PAPER_PAD) + camera.pan,
             zoom: camera.zoom,
+            pitch,
         }
     }
 
@@ -610,7 +650,7 @@ impl View {
     fn layout(&self, top: f32) -> Layout {
         Layout::with_cell(
             self.point(GRID_LEFT, top),
-            Vec2::new(COL_PITCH * self.zoom, ROW_PITCH * self.zoom),
+            Vec2::new(self.pitch, ROW_PITCH * self.zoom),
         )
     }
 }
@@ -1631,7 +1671,7 @@ fn paint_empty_network(
     let area = Rect::from_min_max(
         grid.origin,
         view.point(
-            GRID_LEFT + COL_PITCH * 5.0,
+            GRID_LEFT + grid.cell.x / view.zoom * 5.0,
             network.grid_top() + ROW_PITCH * 2.0,
         ),
     );
@@ -2281,26 +2321,21 @@ mod tests {
     }
 
     #[test]
-    fn fitting_frames_a_document_that_fits_and_never_magnifies() {
+    fn fitting_frames_without_touching_the_zoom() {
         let content = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 200.0));
         let viewport = Rect::from_min_size(pos2(50.0, 50.0), vec2(800.0, 400.0));
-        let camera = fit_camera(content, viewport, viewport.min, None);
-        assert_eq!(camera.zoom, 1.0, "a small document is not blown up");
+        let camera = fit_camera(content, viewport, viewport.min, 1.0, None);
+        assert_eq!(camera.zoom, 1.0, "framing never zooms");
         // The document starts at the top left of the viewport.
         let top_left = viewport.min + camera.pan + content.min.to_vec2() * camera.zoom;
         assert!((top_left.y - viewport.top()).abs() < 0.01, "top aligned");
         assert!((top_left.x - viewport.left()).abs() < 0.01, "left aligned");
 
-        // A document that does not fit width-wise is scaled down, but never
-        // below the zoom a ladder stays readable at.
-        let wide = Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 200.0));
-        let camera = fit_camera(wide, viewport, viewport.min, None);
-        assert!(
-            (camera.zoom - FIT_MIN_ZOOM).abs() < 0.01,
-            "zoom {}",
-            camera.zoom
-        );
-        assert!(wide.width() * camera.zoom <= viewport.width() + 0.01);
+        // A user zoom survives framing untouched.
+        let camera = fit_camera(content, viewport, viewport.min, 2.0, None);
+        assert_eq!(camera.zoom, 2.0, "framing never zooms");
+        let top_left = viewport.min + camera.pan + content.min.to_vec2() * camera.zoom;
+        assert!((top_left.y - viewport.top()).abs() < 0.01, "top aligned");
     }
 
     #[test]
@@ -2308,8 +2343,8 @@ mod tests {
         let content = Rect::from_min_size(Pos2::ZERO, vec2(600.0, 4000.0));
         let viewport = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 400.0));
         let focus = Rect::from_min_size(pos2(0.0, 3000.0), vec2(600.0, 400.0));
-        let camera = fit_camera(content, viewport, viewport.min, Some(focus));
-        assert_eq!(camera.zoom, FIT_MIN_ZOOM, "the ladder stays readable");
+        let camera = fit_camera(content, viewport, viewport.min, 1.0, Some(focus));
+        assert_eq!(camera.zoom, 1.0, "framing never zooms");
         // The focused network is inside the window, and the window stays inside
         // the document.
         let visible_top = (Pos2::ZERO - viewport.min - camera.pan) / camera.zoom;
@@ -2331,15 +2366,41 @@ mod tests {
 
     #[test]
     fn fitting_survives_degenerate_rectangles() {
-        let camera = fit_camera(Rect::ZERO, Rect::ZERO, Pos2::ZERO, None);
+        let camera = fit_camera(Rect::ZERO, Rect::ZERO, Pos2::ZERO, 1.0, None);
         assert_eq!(camera, Camera::default());
         let camera = fit_camera(
             Rect::from_min_size(Pos2::ZERO, vec2(0.0, 100.0)),
             Rect::from_min_size(Pos2::ZERO, vec2(100.0, 100.0)),
             Pos2::ZERO,
+            1.0,
             None,
         );
         assert_eq!(camera, Camera::default());
+    }
+
+    #[test]
+    fn the_pitch_fills_the_window_without_passing_its_bounds() {
+        // A wide paper takes the natural pitch: columns are never stretched
+        // past what a tag name needs.
+        let paper = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 800.0));
+        assert_eq!(col_pitch(paper, 1.0, 8), COL_PITCH);
+        // A narrow paper shrinks the pitch instead of the zoom, so the type
+        // stays readable — but never past the collision floor.
+        let paper = Rect::from_min_size(Pos2::ZERO, vec2(500.0, 800.0));
+        let pitch = col_pitch(paper, 1.0, 8);
+        assert!(pitch < COL_PITCH, "pitch {pitch}");
+        assert!(pitch >= MIN_COL_PITCH, "pitch {pitch}");
+        let paper = Rect::from_min_size(Pos2::ZERO, vec2(200.0, 800.0));
+        assert_eq!(col_pitch(paper, 1.0, 8), MIN_COL_PITCH);
+        // Zoom scales the window budget, not the clamps.
+        let paper = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 800.0));
+        let pitch = col_pitch(paper, 2.0, 8);
+        assert!(
+            (pitch - 79.875).abs() < 0.01,
+            "half the window budget over 8 columns: {pitch}"
+        );
+        // The document spans the grid plus its margins, nothing more.
+        assert_eq!(doc_width(96.0, 8), GRID_LEFT + 96.0 * 8.0 + GRID_TAIL);
     }
 
     #[test]
@@ -2459,7 +2520,8 @@ mod tests {
             ..Rung::new(1)
         };
         let app = EditorApp::new(project_with(rung));
-        let networks = with_painter(|painter| read_networks(&app, painter, &Tokens::light()));
+        let networks =
+            with_painter(|painter| read_networks(&app, painter, &Tokens::light(), DOC_WIDTH));
         let network = networks.first().expect("one network");
         let span = queries::block_span(ElementKind::Counter {
             kind: CounterKind::Up,
@@ -2513,12 +2575,13 @@ mod tests {
             ..Rung::new(1)
         }));
         let painter_networks =
-            with_painter(|painter| read_networks(&app, painter, &Tokens::light()));
+            with_painter(|painter| read_networks(&app, painter, &Tokens::light(), DOC_WIDTH));
         assert_eq!(painter_networks.len(), 1);
         let network = painter_networks.first().expect("one network");
         let view = View {
             origin: Pos2::ZERO,
             zoom: 1.0,
+            pitch: COL_PITCH,
         };
         let grid = view.layout(network.grid_top());
         let inside = layout::cell_rect(0, 0, grid).center();
@@ -2595,7 +2658,8 @@ mod tests {
         project.rungs.push(first);
         project.rungs.push(second);
         let app = EditorApp::new(project);
-        let networks = with_painter(|painter| read_networks(&app, painter, &Tokens::light()));
+        let networks =
+            with_painter(|painter| read_networks(&app, painter, &Tokens::light(), DOC_WIDTH));
         assert_eq!(networks.len(), 2);
         let (first, second) = (
             networks.first().expect("first"),
@@ -2610,7 +2674,8 @@ mod tests {
         assert!(first.height > 0.0 && second.height > 0.0);
         // An empty project has nothing to draw.
         let empty = EditorApp::new(Project::new("empty"));
-        let none = with_painter(|painter| read_networks(&empty, painter, &Tokens::light()));
+        let none =
+            with_painter(|painter| read_networks(&empty, painter, &Tokens::light(), DOC_WIDTH));
         assert!(none.is_empty());
     }
 
