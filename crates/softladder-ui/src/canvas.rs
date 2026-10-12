@@ -215,9 +215,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         ui.ctx().data_mut(|data| data.insert_temp(fit_id, key));
     }
 
-    let space = ui.input(|input| input.key_down(egui::Key::Space));
     handle_wheel(app, ui, &response, paper);
-    handle_pan(app, &response, space);
     let view = View::new(paper, app.camera);
     // Where each network's grid landed on screen this frame, so a test (or an
     // automation driving the real interface) can aim at a cell instead of at a
@@ -276,7 +274,7 @@ pub fn show(app: &mut EditorApp, ui: &mut Ui) {
         paint_network(&clipping, view, network, index, &tokens, &frame);
     }
 
-    handle_pointer(app, ui, &response, &networks, view, space, hover);
+    handle_pointer(app, ui, &response, &networks, view, hover);
     handle_menu(app, ui, &response, &networks, view, hover);
     inline_editor(app, ui, &networks, view);
     expression_tooltip(&response, &networks, hover);
@@ -1733,12 +1731,8 @@ fn handle_pointer(
     response: &egui::Response,
     networks: &[Network],
     view: View,
-    space: bool,
     hover: Option<(usize, u8, u8)>,
 ) {
-    if space {
-        return;
-    }
     let primary = egui::PointerButton::Primary;
     let drag_id = egui::Id::new("softladder-canvas-drag");
     if response.drag_started_by(primary) {
@@ -1887,6 +1881,12 @@ fn start_text_edit(
             EditField::Comment
         } else if rects.title.is_positive() && rects.title.contains(pos) {
             EditField::Title
+        } else {
+            continue;
+        };
+        app.rung_text_target = Some(network.rung.id);
+        app.rung_label_buffer = network.rung.label.clone();
+        app.rung_comment_buffer = network.rung.comment.clone();
         app.rung_cols_buffer = network
             .rung
             .cols
@@ -1897,12 +1897,6 @@ fn start_text_edit(
             .rows
             .map(|size| size.to_string())
             .unwrap_or_default();
-        } else {
-            continue;
-        };
-        app.rung_text_target = Some(network.rung.id);
-        app.rung_label_buffer = network.rung.label.clone();
-        app.rung_comment_buffer = network.rung.comment.clone();
         ui.ctx()
             .data_mut(|data| data.insert_temp(edit_id(), Some((network.rung.id, field))));
         return;
@@ -2168,15 +2162,6 @@ fn context_menu(
             app.centre_tab = CentreTab::Tags;
         }
         ui.close_menu();
-    }
-}
-
-/// Pans the camera with the middle button or with space held down.
-fn handle_pan(app: &mut EditorApp, response: &egui::Response, space: bool) {
-    let middle = response.dragged_by(egui::PointerButton::Middle);
-    let space_drag = space && response.dragged_by(egui::PointerButton::Primary);
-    if middle || space_drag {
-        app.camera.pan_by(response.drag_delta());
     }
 }
 

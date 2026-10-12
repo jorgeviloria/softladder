@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — open ClassicLadder, rung capacity, no drag-pan
+
+### Added
+
+- **Open ClassicLadder projects in the editor.** `File → Open` lists `.clprj`/`.clprjz`
+  next to native projects; a container imports as an unsaved project (saving asks for a
+  native path) with its import report merged into Problems.
+- **A rung's grid capacity is editable.** Empty Columns/Rows in the rung editor mean
+  automatic sizing as before; a number floors the sheet, so a fixed 12 × 8 rung draws
+  exactly 12 × 8. New `SetRungSize` undoable command; additive format fields, no schema
+  bump.
+
+### Removed
+
+- **Drag-pan is gone from ladder and SFC.** The middle button and space-drag no longer move
+  the sheet, which read as drift; the wheel scrolls between networks and the zoom lives
+  behind `Ctrl/Cmd` + wheel, the buttons and the shortcuts.
+
 ## [Unreleased] — the example counter counts again
 
 ### Fixed

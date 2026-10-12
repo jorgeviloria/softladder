@@ -1846,7 +1846,7 @@ mod tests {
     }
 
     #[test]
-    fn a_drag_on_the_canvas_pans_without_touching_the_project() {
+    fn a_middle_drag_on_the_canvas_neither_pans_nor_edits() {
         let ctx = egui::Context::default();
         let mut app = EditorApp::new(project());
         frame(&mut app, &ctx, Vec::new());
@@ -1878,11 +1878,12 @@ mod tests {
                 modifiers: egui::Modifiers::default(),
             }],
         );
-        assert!(
-            app.camera.pan != egui::Vec2::ZERO,
-            "the middle button panned the canvas"
+        assert_eq!(
+            app.camera.pan,
+            egui::Vec2::ZERO,
+            "drag-pan is gone: the wheel scrolls instead"
         );
-        assert_eq!(app.editor.history_len(), 0, "panning is not an edit");
+        assert_eq!(app.editor.history_len(), 0, "a drag with no tool is not an edit");
     }
 
     #[test]

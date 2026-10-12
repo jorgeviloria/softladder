@@ -159,8 +159,9 @@ toggle, not a separate design.
   shows a ghost preview; click places (replacing, one undo step); drag moves; `Del` deletes; a
   right-click menu offers *Insert contact before / after, Insert branch, Toggle vertical link,
   Delete, Cut, Copy, Paste, Go to tag*; `V` toggles the link; arrows move the selection; `Ctrl+Z/Y`
-  undo/redo. The wheel scrolls between networks (`Shift` + wheel goes sideways); the canvas pans
-  with the middle button or space-drag, and zooms with `Ctrl +/-`, `Ctrl/Cmd` + wheel or `Ctrl+0`.
+  undo/redo. The wheel scrolls between networks (`Shift` + wheel goes sideways); there is no
+  drag-pan, so the sheet never drifts under the pointer. Zoom with `Ctrl +/-`, `Ctrl/Cmd` + wheel
+  or `Ctrl+0`.
 * **Block pins**: a block in series has one rung input per row the engine reads on the left
   (`IN`; `R/LD/CU/CD`; `R/IN/OUT`) and a single flow-out on the right (`Q`, or `E` for a
   register) sitting on the first row's wire, which is where the rung continues. Readouts

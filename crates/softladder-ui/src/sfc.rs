@@ -448,9 +448,7 @@ fn document(app: &mut EditorApp, ui: &mut Ui, state: &mut View) {
         ui.ctx().data_mut(|data| data.insert_temp(fit_id, key));
     }
 
-    let space = ui.input(|input| input.key_down(egui::Key::Space));
     handle_wheel(app, ui, &response, paper);
-    handle_pan(app, &response, space);
     let transform = ViewTransform::new(paper, app.camera);
 
     let live = app.bench().state().is_scanning() || app.bench().cycles() > 0;
@@ -475,7 +473,7 @@ fn document(app: &mut EditorApp, ui: &mut Ui, state: &mut View) {
         paint_ghost(&clipping, transform, &bands, target, state.tool, &tokens);
     }
 
-    handle_pointer(app, ui, &response, &bands, &page, transform, state, space);
+    handle_pointer(app, ui, &response, &bands, &page, transform, state);
     handle_menu(app, ui, &response, &bands, transform, state);
     expression_tooltip(&response, &page, hovered);
 }
@@ -1617,11 +1615,7 @@ fn handle_pointer(
     page: &SequentialPage,
     transform: ViewTransform,
     state: &mut View,
-    space: bool,
 ) {
-    if space {
-        return;
-    }
     let Some(section) = section_id(app) else {
         return;
     };
@@ -2101,15 +2095,6 @@ fn expression_tooltip(
         return;
     };
     response.clone().on_hover_text(condition.to_string());
-}
-
-/// Pans the camera with the middle button or with space held down.
-fn handle_pan(app: &mut EditorApp, response: &egui::Response, space: bool) {
-    let middle = response.dragged_by(egui::PointerButton::Middle);
-    let space_drag = space && response.dragged_by(egui::PointerButton::Primary);
-    if middle || space_drag {
-        app.camera.pan_by(response.drag_delta());
-    }
 }
 
 /// Scrolls between pages with the wheel, zooms around the pointer with
