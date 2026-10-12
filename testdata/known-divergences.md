@@ -46,13 +46,15 @@ inside the limits by construction.
 
 ## 4. Expression syntax
 
-**Reference:** `@<type>/<num>@` variable placeholders, `:=` for assignment, `&`/`|` for `AND`/`OR`,
-`$`-prefixed hexadecimal literals, and the function names `ABS`, `MINI`, `MAXI`, `MOY`, `POW`, `SHL`,
-`SHR`, `ROL`, `ROR`.
+**Reference:** `@<type>/<num>@` variable placeholders, `:=` for assignment (though its own
+projects, e.g. `3pumps.clprj`, spell operate assignments with a bare `=`, as in
+`@200/0@=@200/0@+1`), `&`/`|` for `AND`/`OR`, `$`-prefixed hexadecimal literals, and the function
+names `ABS`, `MINI`, `MAXI`, `MOY`, `POW`, `SHL`, `SHR`, `ROL`, `ROR`.
 
 **SoftLadder:** `%MW0`, `=` for comparison, `AND`/`OR` (with `&`/`|` accepted), `$8000` and `0x8000`,
 and the same functions with `MIN`/`MAX`/`AVG` as the canonical names and the ClassicLadder aliases
-accepted. The importer translates in both directions.
+accepted. The importer translates in both directions, reading a bare `=` as assignment inside an
+operate cell (and exporting `:=`, which re-imports to the same parameters).
 
 **Why:** the `%`-notation is the one ClassicLadder's own variable table shows to users, and
 `MIN`/`MAX`/`AVG` are the IEC spellings. Untranslatable text is kept verbatim with `SL-W031` so it is

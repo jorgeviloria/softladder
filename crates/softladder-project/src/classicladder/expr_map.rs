@@ -98,6 +98,10 @@ pub(crate) fn translate_expression(text: &str) -> Expression {
 }
 
 /// Translates a ClassicLadder assignment into SoftLadder `[target, rhs]`.
+///
+/// An operate cell assigns, so besides `:=` a bare `=` at depth zero splits
+/// target from value — that is how the reference's own projects spell it
+/// (`@200/0@=@200/0@+1` counts up). Anything else keeps the old refusal.
 pub(crate) fn translate_operate(text: &str) -> Operate {
     let Ok(tokens) = tokenize(text) else {
         return Operate {
@@ -111,6 +115,7 @@ pub(crate) fn translate_operate(text: &str) -> Operate {
     let Some(split) = tokens
         .iter()
         .position(|token| matches!(token, Token::Operator(op) if op == ":="))
+        .or_else(|| assignment_equals(&tokens))
     else {
         return Operate {
             classic,
@@ -157,6 +162,27 @@ pub(crate) fn translate_operate(text: &str) -> Operate {
             notes: Vec::new(),
         },
     }
+}
+
+/// Position of a bare `=` used as the assignment operator, if there is exactly
+/// one at parenthesis depth zero (`==`, `<=` and friends are other tokens).
+fn assignment_equals(tokens: &[Token]) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut found = None;
+    for (index, token) in tokens.iter().enumerate() {
+        match token {
+            Token::Operator(op) if op == "(" => depth += 1,
+            Token::Operator(op) if op == ")" => depth = depth.saturating_sub(1),
+            Token::Operator(op) if op == "=" && depth == 0 => {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(index);
+            }
+            _ => {}
+        }
+    }
+    found
 }
 
 /// Renders a SoftLadder expression in ClassicLadder syntax.
@@ -577,4 +603,45 @@ fn scan_soft_var(text: &str) -> Option<usize> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_bare_equals_assigns_in_operate_cells() {
+        // 3pumps.clprj spells every assignment this way; the reference runs it.
+        let translated = translate_operate("@200/0@=@200/0@+1");
+        assert_eq!(
+            translated.params,
+            Some(vec!["%MW0".to_owned(), "%MW0+1".to_owned()]),
+            "unexpected: {:?}",
+            translated.reason,
+        );
+        let translated = translate_operate("@200/1@=0");
+        assert_eq!(
+            translated.params,
+            Some(vec!["%MW1".to_owned(), "0".to_owned()]),
+        );
+        // The canonical spelling keeps working.
+        let translated = translate_operate("@200/0@:=-@200/0@");
+        assert_eq!(
+            translated.params,
+            Some(vec!["%MW0".to_owned(), "-%MW0".to_owned()]),
+        );
+    }
+
+    #[test]
+    fn operate_without_any_assignment_still_refuses() {
+        let translated = translate_operate("@200/0@+1");
+        assert!(translated.params.is_none());
+        assert_eq!(
+            translated.reason.as_deref(),
+            Some("the assignment has no `:=` operator"),
+        );
+        // Two bare equals are ambiguous, not an assignment.
+        let translated = translate_operate("@200/0@=@200/1@=@200/2@");
+        assert!(translated.params.is_none());
+    }
 }

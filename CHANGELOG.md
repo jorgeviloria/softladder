@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — operate `=` imports, `.clp` opens
+
+### Fixed
+
+- **`3pumps.clprj` imported with 14 errors.** Its operate cells spell assignment with a bare
+  `=` (`@200/0@=@200/0@+1`), which the importer kept verbatim instead of translating — and the
+  verbatim text then failed lint and scan. A single depth-zero `=` now splits target from value
+  in operate cells (the reference's own spelling); `:=` still works and round-trips.
+- **`.clp` files did not open.** The legacy extension is the same container and the importer
+  always accepted it — only the editor's filter and extension gate said no. Both take
+  `.clp` now.
+
 ## [Unreleased] — open ClassicLadder, rung capacity, no drag-pan
 
 ### Added

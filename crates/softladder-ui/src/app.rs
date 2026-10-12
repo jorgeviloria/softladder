@@ -1883,7 +1883,11 @@ mod tests {
             egui::Vec2::ZERO,
             "drag-pan is gone: the wheel scrolls instead"
         );
-        assert_eq!(app.editor.history_len(), 0, "a drag with no tool is not an edit");
+        assert_eq!(
+            app.editor.history_len(),
+            0,
+            "a drag with no tool is not an edit"
+        );
     }
 
     #[test]

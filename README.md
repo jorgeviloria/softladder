@@ -43,8 +43,8 @@ rebuilds everything around it:
   HAL bridge need hardware.
 - **Observability** — JSON monitor protocol over TCP plus an HTTP dashboard, bearer roles, alarms
   with acknowledgement and an in-memory journal (WebSocket, TLS and SQLite pending).
-- **Interoperability** — import and export ClassicLadder `.clprj` / `.clprjz` containers, including
-  opening them straight in the editor.
+- **Interoperability** — import and export ClassicLadder `.clp` / `.clprj` / `.clprjz`
+  containers, including opening them straight in the editor.
 
 ## Status
 

@@ -67,9 +67,10 @@ impl Editor {
     /// Opens a project file.
     ///
     /// `.slprj`/`.slprjz` load through `softladder_project::native`;
-    /// `.clprj`/`.clprjz` import through ClassicLadder and open as an unsaved
-    /// project (saving asks for a native path), with the import report merged
-    /// into the Problems list. Anything else is rejected by extension.
+    /// `.clp`/`.clprj`/`.clprjz` import through ClassicLadder (`.clp` is the
+    /// legacy extension for the same container) and open as an unsaved project
+    /// (saving asks for a native path), with the import report merged into the
+    /// Problems list. Anything else is rejected by extension.
     ///
     /// Nothing is returned unless the file loaded completely, so a failed open
     /// never leaves a half-built editor behind.
@@ -79,7 +80,7 @@ impl Editor {
             .and_then(|extension| extension.to_str())
             .unwrap_or("")
             .to_ascii_lowercase();
-        if extension == "clprj" || extension == "clprjz" {
+        if extension == "clp" || extension == "clprj" || extension == "clprjz" {
             let report = classicladder::import_file(path)?;
             let mut editor = Self::new(report.project);
             for diagnostic in report.diagnostics {
@@ -98,7 +99,7 @@ impl Editor {
         }
         Err(EditError::Project(
             softladder_project::ProjectError::Container(format!(
-                "unsupported project extension `{extension}` (slprj, slprjz, clprj, clprjz)"
+                "unsupported project extension `{extension}` (slprj, slprjz, clp, clprj, clprjz)"
             )),
         ))
     }
@@ -2297,12 +2298,18 @@ mod tests {
             .expect("exports a container");
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join("legacy.clprj");
-        std::fs::write(&path, bytes).expect("writes");
+        std::fs::write(&path, &bytes).expect("writes");
 
         let editor = Editor::open(&path).expect("classic opens");
         assert_eq!(editor.project().rungs.len(), 1);
         assert!(editor.path().is_none());
         assert!(editor.is_dirty());
+
+        // `.clp` is the legacy extension for the same container.
+        let legacy = directory.path().join("legacy.clp");
+        std::fs::write(&legacy, &bytes).expect("writes");
+        let editor = Editor::open(&legacy).expect("legacy classic opens");
+        assert_eq!(editor.project().rungs.len(), 1);
 
         let missing = directory.path().join("plant.txt");
         assert!(Editor::open(&missing).is_err());

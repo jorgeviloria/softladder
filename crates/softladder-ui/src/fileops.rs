@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 /// File extensions a SoftLadder project can use.
 pub const PROJECT_EXTENSIONS: [&str; 2] = ["slprj", "slprjz"];
 
-/// ClassicLadder containers the editor imports on open.
-pub const CLASSIC_EXTENSIONS: [&str; 2] = ["clprj", "clprjz"];
+/// ClassicLadder containers the editor imports on open (`.clp` is the legacy
+/// extension for the same container).
+pub const CLASSIC_EXTENSIONS: [&str; 3] = ["clp", "clprj", "clprjz"];
 
 /// Extension appended to a save path that carries none.
 pub const DEFAULT_EXTENSION: &str = "slprj";
@@ -123,6 +124,6 @@ mod tests {
     fn the_project_extensions_are_the_ones_the_loader_accepts() {
         assert!(PROJECT_EXTENSIONS.contains(&DEFAULT_EXTENSION));
         assert_eq!(PROJECT_EXTENSIONS.len(), 2);
-        assert_eq!(CLASSIC_EXTENSIONS, ["clprj", "clprjz"]);
+        assert_eq!(CLASSIC_EXTENSIONS, ["clp", "clprj", "clprjz"]);
     }
 }
