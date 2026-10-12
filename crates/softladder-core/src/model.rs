@@ -135,8 +135,8 @@ impl ElementKind {
     /// [`ElementKind::input_rows`], and the editor draws exactly these pins, so
     /// the drawing cannot advertise a wire the engine never reads. A timer has
     /// one input (its enable — the preset is a *parameter*, `%TM0.P`, not a
-    /// wire), a counter four (`R`, `LD`, `CU`, `CD`) and a register three
-    /// (`R`, `IN`, `OUT`).
+    /// wire), a counter four (`R`, `P`, `U`, `D`, as the reference draws them)
+    /// and a register three (`R`, `IN`, `OUT`).
     ///
     /// The order is the order the engine destructures its inputs in
     /// (`[reset, load, up, down]`), so a label must not be moved without moving
@@ -144,7 +144,7 @@ impl ElementKind {
     pub fn input_pins(self) -> &'static [&'static str] {
         match self {
             ElementKind::Timer { .. } => &["IN"],
-            ElementKind::Counter { .. } => &["R", "LD", "CU", "CD"],
+            ElementKind::Counter { .. } => &["R", "P", "U", "D"],
             ElementKind::Register { .. } => &["R", "IN", "OUT"],
             _ => &[],
         }
@@ -481,7 +481,7 @@ mod tests {
                 kind: CounterKind::Up
             }
             .input_pins(),
-            ["R", "LD", "CU", "CD"]
+            ["R", "P", "U", "D"]
         );
         assert_eq!(
             ElementKind::Register {

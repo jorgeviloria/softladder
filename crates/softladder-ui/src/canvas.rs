@@ -1627,11 +1627,14 @@ fn block_outputs(kind: ElementKind) -> Vec<(&'static str, u8)> {
 }
 
 /// The labels drawn on the right of a block with no stub: live readouts that
-/// are read as variables (`%TM0.V`, `%C0.V`), never wired.
+/// are read as variables (`%TM0.V`), never wired.
+///
+/// Counters and registers show their values inside the box instead, like the
+/// reference, so they keep no readout label at all.
 fn block_readouts(kind: ElementKind) -> &'static [&'static str] {
     match kind {
         ElementKind::Timer { .. } => &["ET"],
-        ElementKind::Counter { .. } => &["CV"],
+        ElementKind::Counter { .. } => &[],
         ElementKind::Register { .. } => &[],
         _ => &[],
     }
@@ -2933,12 +2936,10 @@ mod tests {
             );
         }
         assert!(block_outputs(ElementKind::ContactNo).is_empty());
-        assert_eq!(
-            block_readouts(ElementKind::Counter {
-                kind: CounterKind::Up
-            }),
-            ["CV"]
-        );
+        assert!(block_readouts(ElementKind::Counter {
+            kind: CounterKind::Up
+        })
+        .is_empty());
         assert!(block_readouts(ElementKind::Register {
             mode: RegisterMode::Fifo
         })

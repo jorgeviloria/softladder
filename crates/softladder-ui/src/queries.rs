@@ -386,7 +386,7 @@ pub fn rung_cols(rung: &Rung) -> u8 {
 
 /// Number of grid rows a function block reads, one for a single-cell element.
 ///
-/// Mirrors the scan engine: a counter reads `CU/CD/R/LD` from four rows, a
+/// Mirrors the scan engine: a counter reads `R/P/U/D` from four rows, a
 /// register `R/IN/OUT` from three, and a timer from its own row.
 pub fn block_span(kind: ElementKind) -> u8 {
     match kind {

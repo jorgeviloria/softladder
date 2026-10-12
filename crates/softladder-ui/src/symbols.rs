@@ -509,7 +509,7 @@ pub fn element_glyph(painter: &Painter, rect: Rect, tokens: &Tokens, kind: Eleme
             block(painter, rect, style, "TON", &[("IN", -1)], &[("Q", 0)], &[])
         }
         ElementKind::Counter { .. } => {
-            block(painter, rect, style, "CTU", &[("CU", -1)], &[("Q", 0)], &[])
+            block(painter, rect, style, "CTU", &[("U", -1)], &[("Q", 0)], &[])
         }
         ElementKind::Register { .. } => block(
             painter,

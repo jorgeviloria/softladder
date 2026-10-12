@@ -145,8 +145,9 @@ toggle, not a separate design.
   * NO/NC contacts `-| |-` / `-|/|-` with proper gaps; rising/falling edges `-|P|-` / `-|N|-`.
   * Coils `-( )-`, negated `-(/)-`, set `-(S)-`, reset `-(R)-`, jump `-(J)-`, call `-(C)-`.
   * Function blocks are rectangles with the instance name above, the block type inside, and named
-    pins: timer `IN → Q`, counter `R/LD/CU/CD → Q`, register `R/IN/OUT → E`. Readouts (`ET`, `CV`,
-    `F`) and parameters (`PT`, `PV`, `N`) are labels, not pins.
+    pins: timer `IN → Q`, counter `R/P/U/D → E/D/F`, register `R/IN/OUT → E/F`. The `ET` readout
+    and the parameters (`PT`, `PV`, `N`) are labels, not pins; counter and register values show
+    inside the box as `current/preset`.
   * Compare and operate are boxes showing the expression: the box stretches right over empty
     cells (up to four columns) so it reads whole, and only longer expressions truncate with an
     ellipsis and a tooltip that shows them in full.
@@ -170,10 +171,10 @@ toggle, not a separate design.
   last network instead of running onto empty paper. Zoom with `Ctrl +/-`, `Ctrl/Cmd` + wheel
   or `Ctrl+0`.
 * **Block pins**: a block in series has one rung input per row the engine reads on the left
-  (`IN`; `R/LD/CU/CD`; `R/IN/OUT`) and one stub per row the engine drives on the right —
+  (`IN`; `R/P/U/D`; `R/IN/OUT`) and one stub per row the engine drives on the right —
   counter `E/D/F` on three rows, register `E/F` on two, timer `Q` on one — so a rung can chain
-  off any of them, like the reference. Value readouts (`ET`, `CV`) are labels with no stub:
-  they are read as variables, never wired.
+  off any of them, like the reference. The `ET` readout is a label with no stub; counter and
+  register values show inside the box. All pin letters match the reference (`R/P/U/D`, `E/D/F`).
 * **Empty states**: an empty project shows a centred card ("No program yet — **New rung** or open a
   project"); a section with no rungs shows "This section has no rungs"; an unplaced rung shows a
   dashed placeholder "Click a cell to place the armed element".

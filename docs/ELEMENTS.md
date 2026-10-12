@@ -82,11 +82,11 @@ come from it, so the canvas can never advertise a wire the engine does not read.
 pin: a preset is data (`%TM0.P`), drawn beside the instance name (`%TM0 · PT 3000`) and edited in the
 inspector.
 
-| Block | Input pins (row 0 first) | What each row does | Readouts |
+| Block | Input pins (row 0 first) | What each row does | Outputs (one stub per row) |
 | --- | --- | --- | --- |
-| Timer (TON/TOF/TP) | `IN` | the enable; the preset is the `PT` parameter | `Q` (flow out), `ET` |
-| Counter (CTU/CTD/CTUD) | `R`, `LD`, `CU`, `CD` | reset, load the `PV` preset, count up, count down | `Q` (flow out), `CV` |
-| Register (FIFO/LIFO) | `R`, `IN`, `OUT` | reset, push, pop | `E`, `F` |
+| Timer (TON/TOF/TP) | `IN` | the enable; the preset is the `PT` parameter | `Q`, plus the `ET` readout label |
+| Counter (CTU/CTD/CTUD) | `R`, `P`, `U`, `D` | reset, load the `PV` preset, count up, count down | `E`, `D`, `F`; the value shows inside as `current/preset` |
+| Register (FIFO/LIFO) | `R`, `IN`, `OUT` | reset, push, pop | `E`, `F`; the count shows inside |
 | Compare, Operate | — (no pin is drawn) | reads the row it sits on | the result, as the block text |
 
 ## Sequential (SFC)

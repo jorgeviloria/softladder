@@ -77,6 +77,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default, toggled from Tools, the View menu or the project tree, closable with `×`) so the
   operator screen stays visible while the ladder runs beside it.
 
+## [Unreleased] — the counter spells like ClassicLadder
+
+### Changed
+
+- **Counter pins read `R/P/U/D`, and `CV` is no label.** The reference draws single input
+  letters and the value as bare `current/preset` numbers; the canvas matches (the value text
+  inside the box already did). No engine change: order and rows are untouched.
+
 ## [Unreleased] — blocks drive every output row, like ClassicLadder
 
 ### Changed

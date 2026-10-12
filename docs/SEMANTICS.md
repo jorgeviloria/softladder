@@ -200,10 +200,10 @@ A counter block at `(col, row)` occupies four input rows and reads the flow arri
 
 | Input | Row | Behaviour |
 | --- | --- | --- |
-| Reset | `row` | `value := 0` (level, not edge) |
-| Preset | `row + 1` | `value := %C<n>.P` (level, not edge) |
-| Count up | `row + 2` | increment on the rising edge |
-| Count down | `row + 3` | decrement on the rising edge |
+| Reset (`R`) | `row` | `value := 0` (level, not edge) |
+| Preset (`P`) | `row + 1` | `value := %C<n>.P` (level, not edge) |
+| Count up (`U`) | `row + 2` | increment on the rising edge |
+| Count down (`D`) | `row + 3` | decrement on the rising edge |
 
 | Output | Row | Value |
 | --- | --- | --- |
