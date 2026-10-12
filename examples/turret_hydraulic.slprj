@@ -1,0 +1,221 @@
+{
+  "schema_version": 2,
+  "name": "turret_hydraulic",
+  "author": "SoftLadder contributors",
+  "comment": "Hydraulic 8-station lathe turret turning forward only: index plus passing pulses track the position, arrival is confirmed by sensor, unclamp/rotate/clamp with a rotation watchdog.",
+  "sections": [
+    {
+      "id": 1,
+      "name": "Main",
+      "language": "Ladder",
+      "subroutine": null,
+      "rungs": [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    }
+  ],
+  "rungs": [
+    {
+      "id": 1,
+      "label": "count_passing",
+      "comment": "CTU %C0 counts passing pulses %I1; the index sensor %I0 holds reset while parked at station 1, and R/LD/CD rows are tied off with spare_off. Full turn reads done at 8.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 0, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNo", "var": { "kind": "MemBit", "index": 7, "index_expr": null, "accessor": null }, "col": 0, "row": 1, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 1, "index_expr": null, "accessor": null }, "col": 0, "row": 2, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNo", "var": { "kind": "MemBit", "index": 7, "index_expr": null, "accessor": null }, "col": 0, "row": 3, "connected_with_top": false, "params": [] },
+        { "kind": { "Counter": { "kind": "Up" } }, "var": { "kind": "Counter", "index": 0, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": ["8"] }
+      ]
+    },
+    {
+      "id": 2,
+      "label": "position",
+      "comment": "Pulse count modulo 8, plus one: stations T1-T8.",
+      "elements": [
+        { "kind": "Operate", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%MW1", "=", "((%C0.V & 7) + 1)"] }
+      ]
+    },
+    {
+      "id": 3,
+      "label": "distance",
+      "comment": "Forward steps from position to request %IW0, modulo 8: 0 means home.",
+      "elements": [
+        { "kind": "Operate", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%MW2", "=", "((%IW0 - %MW1 + 8) & 7)"] }
+      ]
+    },
+    {
+      "id": 4,
+      "label": "unclamp",
+      "comment": "While away from the requested tool, energize the unclamp solenoid %Q0.",
+      "elements": [
+        { "kind": "Compare", "var": null, "col": 0, "row": 0, "connected_with_top": false, "params": ["%MW2", "<>", "0"] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] }
+      ]
+    },
+    {
+      "id": 5,
+      "label": "rotate",
+      "comment": "Run the hydraulics %Q1 only unclamped, before arrival and fault-free.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 3, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNc", "var": { "kind": "PhysIn", "index": 2, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNc", "var": { "kind": "PhysOut", "index": 3, "index_expr": null, "accessor": null }, "col": 2, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "accessor": null }, "col": 3, "row": 0, "connected_with_top": false, "params": [] }
+      ]
+    },
+    {
+      "id": 6,
+      "label": "settle",
+      "comment": "TON %TM0 waits 300 ms arrived and clamped before the change counts.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 2, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNc", "var": { "kind": "PhysIn", "index": 3, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": { "Timer": { "mode": "On" } }, "var": { "kind": "TimerIec", "index": 0, "index_expr": null, "accessor": null }, "col": 2, "row": 0, "connected_with_top": false, "params": ["300"] }
+      ]
+    },
+    {
+      "id": 7,
+      "label": "done",
+      "comment": "Settled, arrived and clamped: the tool is ready %Q2.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "TimerIec", "index": 0, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 2, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "ContactNc", "var": { "kind": "PhysIn", "index": 3, "index_expr": null, "accessor": null }, "col": 2, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 2, "index_expr": null, "accessor": null }, "col": 3, "row": 0, "connected_with_top": false, "params": [] }
+      ]
+    },
+    {
+      "id": 8,
+      "label": "watchdog",
+      "comment": "TON %TM1 trips when a rotation takes longer than 10 s.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": { "Timer": { "mode": "On" } }, "var": { "kind": "TimerIec", "index": 1, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": ["10000"] }
+      ]
+    },
+    {
+      "id": 9,
+      "label": "fault",
+      "comment": "Latched rotation fault %Q3 stops the motor until the next change.",
+      "elements": [
+        { "kind": "ContactNo", "var": { "kind": "TimerIec", "index": 1, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
+        { "kind": "CoilOut", "var": { "kind": "PhysOut", "index": 3, "index_expr": null, "accessor": null }, "col": 1, "row": 0, "connected_with_top": false, "params": [] }
+      ]
+    }
+  ],
+  "symbols": [
+    { "name": "index_t1", "var": { "kind": "PhysIn", "index": 0, "index_expr": null, "accessor": null }, "comment": "Index sensor: TRUE at station 1", "unit": null },
+    { "name": "passing", "var": { "kind": "PhysIn", "index": 1, "index_expr": null, "accessor": null }, "comment": "Passing sensor: pulse per station", "unit": null },
+    { "name": "at_target", "var": { "kind": "PhysIn", "index": 2, "index_expr": null, "accessor": null }, "comment": "Arrival sensor: TRUE at the requested tool", "unit": null },
+    { "name": "unclamped", "var": { "kind": "PhysIn", "index": 3, "index_expr": null, "accessor": null }, "comment": "Unclamp sensor: TRUE while unclamped", "unit": null },
+    { "name": "requested", "var": { "kind": "PhysInWord", "index": 0, "index_expr": null, "accessor": null }, "comment": "Requested tool T1-T8", "unit": null },
+    { "name": "unclamp_out", "var": { "kind": "PhysOut", "index": 0, "index_expr": null, "accessor": null }, "comment": "Unclamp solenoid", "unit": null },
+    { "name": "motor", "var": { "kind": "PhysOut", "index": 1, "index_expr": null, "accessor": null }, "comment": "Hydraulic rotation motor, forward only", "unit": null },
+    { "name": "ready", "var": { "kind": "PhysOut", "index": 2, "index_expr": null, "accessor": null }, "comment": "Tool ready lamp", "unit": null },
+    { "name": "fault", "var": { "kind": "PhysOut", "index": 3, "index_expr": null, "accessor": null }, "comment": "Rotation fault lamp", "unit": null },
+    { "name": "position", "var": { "kind": "MemWord", "index": 1, "index_expr": null, "accessor": null }, "comment": "Counted turret position T1-T8", "unit": null },
+    { "name": "distance", "var": { "kind": "MemWord", "index": 2, "index_expr": null, "accessor": null }, "comment": "Forward steps to the request", "unit": null },
+    { "name": "spare_off", "var": { "kind": "MemBit", "index": 7, "index_expr": null, "accessor": null }, "comment": "Always false: ties off the unused LD/CD rows of the counter", "unit": null }
+  ],
+  "simulation": {
+    "switches": [
+      {
+        "var": {
+          "kind": "PhysIn",
+          "index": 0,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "index_t1",
+        "momentary": false
+      },
+      {
+        "var": {
+          "kind": "PhysIn",
+          "index": 1,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "passing",
+        "momentary": false
+      },
+      {
+        "var": {
+          "kind": "PhysIn",
+          "index": 2,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "at_target",
+        "momentary": false
+      },
+      {
+        "var": {
+          "kind": "PhysIn",
+          "index": 3,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "unclamped",
+        "momentary": false
+      }
+    ],
+    "lamps": [
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 0,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "unclamp",
+        "colour": "Amber"
+      },
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 1,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "motor"
+      },
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 2,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "ready"
+      },
+      {
+        "var": {
+          "kind": "PhysOut",
+          "index": 3,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "fault",
+        "colour": "Red"
+      }
+    ],
+    "analogs": [
+      {
+        "var": {
+          "kind": "PhysInWord",
+          "index": 0,
+          "index_expr": null,
+          "accessor": null
+        },
+        "label": "requested tool",
+        "min": 1,
+        "max": 8,
+        "unit": ""
+      }
+    ],
+    "gauges": []
+  },
+  "scan": {
+    "period_ms": 10,
+    "input_period_ms": 10
+  }
+}

@@ -140,6 +140,32 @@ Toward LinuxCNC: every variable already uses IEC naming (`%I` sensors, `%Q`
 actuators), so the M7 HAL bridge will map them 1:1 onto HAL pins; until then,
 commission the cycle here in simulation.
 
+## `turret_hydraulic.slprj`
+
+A hydraulic 8-station lathe turret (tools T1–T8) turning forward only, with one
+sensor per job: index at station 1 (`%I0`), a passing pulse per station (`%I1`),
+arrival at the requested tool (`%I2`) and unclamped feedback (`%I3`):
+
+| rung | what it does |
+|------|--------------|
+| 1 | CTU `%C0` counts passing pulses; `%I0` holds reset while parked at station 1, and the unused `LD`/`CD` rows are tied off with `spare_off`. |
+| 2 | Position `%MW1` is the count modulo 8, plus one (T1–T8). |
+| 3 | Forward distance to `%IW0`, modulo 8, into `%MW2`. |
+| 4 | Off-target unclamps: `%Q0`. |
+| 5 | Runs the hydraulics `%Q1` only unclamped, before arrival and fault-free. |
+| 6–7 | Settled, arrived and clamped after 300 ms: the tool-ready lamp `%Q2`. |
+| 8–9 | Watchdog: `%TM1` trips `%Q3` when a rotation takes longer than 10 s. |
+
+Play it on the bench: request a tool on the slider, open *unclamped*, drop the
+index, pulse *passing* once per station and raise *at_target* on arrival —
+then close *unclamped* and watch *ready*. `turret_hydraulic.sltest` scripts a
+change to T4 with 11 assertions:
+
+```console
+$ cargo run -p softladder-cli -- test examples/turret_hydraulic.slprj examples/turret_hydraulic.sltest
+test: scenario="hydraulic turret change to T4" project="examples/turret_hydraulic.slprj" cycles=85 asserted=11 failures=0
+```
+
 ## Writing your own
 
 A project is plain, diff-friendly JSON; see [`docs/FORMAT.md`](../docs/FORMAT.md)

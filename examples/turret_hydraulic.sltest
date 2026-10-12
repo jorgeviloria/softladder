@@ -1,0 +1,34 @@
+{
+  "name": "hydraulic turret change to T4",
+  "steps": [
+    {"cycle": 0, "var": "%I0", "value": true},
+    {"cycle": 0, "var": "%I2", "value": true},
+    {"cycle": 0, "var": "%IW0", "value": 1},
+    {"cycle": 0, "var": "%I3", "value": false},
+    {"cycle": 36, "var": "%IW0", "value": 4},
+    {"cycle": 36, "var": "%I2", "value": false},
+    {"cycle": 37, "var": "%I3", "value": true},
+    {"cycle": 39, "var": "%I0", "value": false},
+    {"cycle": 41, "var": "%I1", "value": true},
+    {"cycle": 42, "var": "%I1", "value": false},
+    {"cycle": 45, "var": "%I1", "value": true},
+    {"cycle": 46, "var": "%I1", "value": false},
+    {"cycle": 49, "var": "%I1", "value": true},
+    {"cycle": 50, "var": "%I1", "value": false},
+    {"cycle": 51, "var": "%I2", "value": true},
+    {"cycle": 53, "var": "%I3", "value": false}
+  ],
+  "assertions": [
+    {"cycle": 5, "var": "%Q1", "expected": false},
+    {"cycle": 35, "var": "%Q2", "expected": true},
+    {"cycle": 37, "var": "%Q0", "expected": true},
+    {"cycle": 38, "var": "%Q1", "expected": true},
+    {"cycle": 38, "var": "%MW2", "expected": 3},
+    {"cycle": 48, "var": "%C0.V", "expected": 2},
+    {"cycle": 51, "var": "%MW1", "expected": 4},
+    {"cycle": 52, "var": "%Q1", "expected": false},
+    {"cycle": 85, "var": "%Q2", "expected": true},
+    {"cycle": 85, "var": "%Q0", "expected": false},
+    {"cycle": 85, "var": "%Q3", "expected": false}
+  ]
+}
