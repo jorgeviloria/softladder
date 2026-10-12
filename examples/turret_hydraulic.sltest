@@ -1,5 +1,5 @@
 {
-  "name": "hydraulic turret change to T4",
+  "name": "hydraulic turret changes with full-turn wrap",
   "steps": [
     {"cycle": 0, "var": "%I0", "value": true},
     {"cycle": 0, "var": "%I2", "value": true},
@@ -16,7 +16,24 @@
     {"cycle": 49, "var": "%I1", "value": true},
     {"cycle": 50, "var": "%I1", "value": false},
     {"cycle": 51, "var": "%I2", "value": true},
-    {"cycle": 53, "var": "%I3", "value": false}
+    {"cycle": 53, "var": "%I3", "value": false},
+    {"cycle": 86, "var": "%IW0", "value": 1},
+    {"cycle": 86, "var": "%I2", "value": false},
+    {"cycle": 87, "var": "%I3", "value": true},
+    {"cycle": 88, "var": "%I0", "value": false},
+    {"cycle": 90, "var": "%I1", "value": true},
+    {"cycle": 91, "var": "%I1", "value": false},
+    {"cycle": 92, "var": "%I1", "value": true},
+    {"cycle": 93, "var": "%I1", "value": false},
+    {"cycle": 94, "var": "%I1", "value": true},
+    {"cycle": 95, "var": "%I1", "value": false},
+    {"cycle": 96, "var": "%I1", "value": true},
+    {"cycle": 97, "var": "%I1", "value": false},
+    {"cycle": 98, "var": "%I1", "value": true},
+    {"cycle": 99, "var": "%I1", "value": false},
+    {"cycle": 100, "var": "%I0", "value": true},
+    {"cycle": 100, "var": "%I2", "value": true},
+    {"cycle": 102, "var": "%I3", "value": false}
   ],
   "assertions": [
     {"cycle": 5, "var": "%Q1", "expected": false},
@@ -32,6 +49,15 @@
     {"cycle": 52, "var": "%Q1", "expected": false},
     {"cycle": 85, "var": "%Q2", "expected": true},
     {"cycle": 85, "var": "%Q0", "expected": false},
-    {"cycle": 85, "var": "%Q3", "expected": false}
+    {"cycle": 85, "var": "%Q3", "expected": false},
+    {"cycle": 93, "var": "%MW1", "expected": 6},
+    {"cycle": 97, "var": "%MW1", "expected": 8},
+    {"cycle": 99, "var": "%C0.V", "expected": 8},
+    {"cycle": 99, "var": "%MW1", "expected": 1},
+    {"cycle": 101, "var": "%C0.V", "expected": 0},
+    {"cycle": 101, "var": "%MW1", "expected": 1},
+    {"cycle": 101, "var": "%Q1", "expected": false},
+    {"cycle": 135, "var": "%Q2", "expected": true},
+    {"cycle": 135, "var": "%Q3", "expected": false}
   ]
 }

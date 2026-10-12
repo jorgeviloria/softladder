@@ -16,7 +16,7 @@
     {
       "id": 1,
       "label": "count_passing",
-      "comment": "CTU %C0 counts passing pulses %I1; the index sensor %I0 holds reset (count 0) while parked at station 1, and R/LD/CD rows are tied off with spare_off. Stations read T1-T8 on %MW1; %C0.V is pulses since index. Full turn reads done at 8.",
+      "comment": "CTU %C0 counts passing pulses %I1; the index sensor %I0 holds reset (count 0) while parked at station 1, and R/LD/CD rows are tied off with spare_off. Stations read T1-T8 on %MW1; %C0.V is pulses since index. A full turn wraps 8 to 1 on its own: the 8th pulse reads done and station 1, then the index clears the count.",
       "elements": [
         { "kind": "ContactNo", "var": { "kind": "PhysIn", "index": 0, "index_expr": null, "accessor": null }, "col": 0, "row": 0, "connected_with_top": false, "params": [] },
         { "kind": "ContactNo", "var": { "kind": "MemBit", "index": 7, "index_expr": null, "accessor": null }, "col": 0, "row": 1, "connected_with_top": false, "params": [] },

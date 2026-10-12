@@ -162,12 +162,13 @@ there is no position 0.
 
 Play it on the bench: request a tool on the slider, open *unclamped*, drop the
 index, pulse *passing* once per station and raise *at_target* on arrival —
-then close *unclamped* and watch *ready*. `turret_hydraulic.sltest` scripts a
-change to T4 with 14 assertions:
+then close *unclamped* and watch *ready*. A full turn wraps station 8 back to 1 on its
+own: the 8th pulse reads done with position 1, then the index clears the count.
+`turret_hydraulic.sltest` scripts a change to T4 plus the full turn home with 23 assertions:
 
 ```console
 $ cargo run -p softladder-cli -- test examples/turret_hydraulic.slprj examples/turret_hydraulic.sltest
-test: scenario="hydraulic turret change to T4" project="examples/turret_hydraulic.slprj" cycles=85 asserted=11 failures=0
+test: scenario="hydraulic turret changes with full-turn wrap" project="examples/turret_hydraulic.slprj" cycles=135 asserted=23 failures=0
 ```
 
 ## Writing your own
