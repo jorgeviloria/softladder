@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 use softladder_core::model::WireMode;
 use softladder_core::{
-    ElementKind, PlacedElement, Project, Rung, ScanConfig, Section, SectionLanguage, Severity,
-    SimSwitch, Symbol, TimerMode, VarKind, VarRef,
+    Diagnostic, ElementKind, PlacedElement, Project, Rung, ScanConfig, Section, SectionLanguage,
+    Severity, SimSwitch, Symbol, TimerMode, VarKind, VarRef,
 };
 use softladder_project::classicladder::{self, Document};
 
@@ -489,6 +489,68 @@ fn corpus_deprecated_families_are_warned_about() {
         warnings > 0,
         "the corpus uses deprecated `%T`/`%M` families, which must be reported"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Rung chains
+// ---------------------------------------------------------------------------
+
+/// A section over `first`..=`last` with `rungs` rung files; each rung is
+/// empty but addressed, with the given `#PREVRUNG`/`#NEXTRUNG` pointers.
+fn chained_section(first: i64, last: i64, links: &[(u32, i64, i64)]) -> Document {
+    let mut parts: Vec<(String, String)> = vec![(
+        "sections.csv".to_owned(),
+        format!("#VER=1.0\n#NAME000=Prog1\n000,0,-1,{first},{last},0\n"),
+    )];
+    for (id, prev, next) in links {
+        parts.push((
+            format!("rung_{id}.csv"),
+            format!(
+                "#VER=3.0\n#LABEL=\n#COMMENT=\n#PREVRUNG={prev}\n#NEXTRUNG={next}\n\
+                 #NBRLINES=8\n0-0-0/0 , 0-0-0/0 , 0-0-0/0 , 0-0-0/0\n\
+                 0-0-0/0 , 0-0-0/0 , 0-0-0/0 , 0-0-0/0\n"
+            ),
+        ));
+    }
+    let refs: Vec<(&str, &str)> = parts
+        .iter()
+        .map(|(name, contents)| (name.as_str(), contents.as_str()))
+        .collect();
+    container(&refs)
+}
+
+fn chain_warnings(report_diagnostics: &[Diagnostic]) -> Vec<String> {
+    report_diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.message.contains("rung chain"))
+        .map(|diagnostic| diagnostic.message.clone())
+        .collect()
+}
+
+#[test]
+fn a_stale_tail_pointer_is_not_a_broken_chain() {
+    // Every rung file resolves; only the last NEXT dangles past the end, the
+    // reference's usual stale tail pointer.
+    let document = chained_section(0, 2, &[(0, -1, 1), (1, 0, 2), (2, 1, 9)]);
+    let report = classicladder::import(&document).expect("imports");
+    assert!(chain_warnings(&report.diagnostics).is_empty());
+    assert_eq!(report.project.sections[0].rungs, vec![0, 1, 2]);
+}
+
+#[test]
+fn a_hole_mid_chain_warns_and_falls_back_to_ascending_order() {
+    // rung_2.csv points past rung_3.csv, which exists but is unreached.
+    let document = chained_section(0, 3, &[(0, -1, 1), (1, 0, 2), (2, 1, 9), (3, 2, -1)]);
+    let report = classicladder::import(&document).expect("imports");
+    assert_eq!(chain_warnings(&report.diagnostics).len(), 1);
+    assert_eq!(report.project.sections[0].rungs, vec![0, 1, 2, 3]);
+}
+
+#[test]
+fn a_cyclic_chain_warns() {
+    let document = chained_section(0, 1, &[(0, 1, 1), (1, 0, 0)]);
+    let report = classicladder::import(&document).expect("imports");
+    assert_eq!(chain_warnings(&report.diagnostics).len(), 1);
 }
 
 // ---------------------------------------------------------------------------

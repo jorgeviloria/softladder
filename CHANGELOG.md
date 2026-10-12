@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — stale rung tails are not broken chains
+
+### Fixed
+
+- **A dangling final `NEXTRUNG` warned as a broken chain.** The reference's usual stale tail
+  pointer (last rung pointing past the last file) now ends the walk silently when every
+  resolvable rung was collected; cycles, missing first rungs and mid-chain holes still warn
+  and fall back to ascending order.
+
 ## [Unreleased] — passthrough parts survive, quieter Problems
 
 ### Added

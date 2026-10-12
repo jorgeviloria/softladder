@@ -131,6 +131,18 @@ struct RawSequenceTransition {
     condition: Option<(i64, i64, usize)>,
 }
 
+/// How a rung-chain walk ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChainStop {
+    /// Reached `NEXTRUNG=-1`: the chain is complete.
+    End,
+    /// Hit a pointer to no rung file: a stale tail pointer when nothing
+    /// resolvable was left behind, a hole otherwise.
+    Dangling,
+    /// Revisited a rung: the chain is corrupt.
+    Cycle,
+}
+
 impl Importer {
     fn new(document: &Document) -> Self {
         Self {
@@ -1747,26 +1759,38 @@ impl Importer {
     }
 
     /// Walks `#PREVRUNG`/`#NEXTRUNG` from a section's first rung.
+    ///
+    /// A dangling `NEXTRUNG` past the last rung file is the reference's usual
+    /// stale tail pointer, not a broken chain: when every resolvable rung was
+    /// already collected, the walk simply ends there, silently. Anything else
+    /// unresolvable (a cycle, a missing first rung, a hole mid-chain) warns
+    /// and falls back to ascending rung order.
     fn resolve_rungs(&mut self, entry: &RawSection) -> Vec<u32> {
         if entry.first_rung >= 0 {
             let mut rungs = Vec::new();
             let mut seen = BTreeSet::new();
             let mut current = entry.first_rung;
-            let mut broken = false;
+            let mut stop = ChainStop::End;
             while current != -1 {
                 let Ok(id) = u32::try_from(current) else {
-                    broken = true;
+                    stop = ChainStop::Dangling;
                     break;
                 };
-                if !seen.insert(id) || !self.links.contains_key(&id) {
-                    broken = true;
+                if !seen.insert(id) {
+                    stop = ChainStop::Cycle;
+                    break;
+                }
+                if !self.links.contains_key(&id) {
+                    stop = ChainStop::Dangling;
                     break;
                 }
                 rungs.push(id);
                 current = self.links.get(&id).map(|(_, next)| *next).unwrap_or(-1);
             }
-            if !broken {
-                return rungs;
+            match stop {
+                ChainStop::End => return rungs,
+                ChainStop::Dangling if self.covers_fallback(&rungs, entry) => return rungs,
+                ChainStop::Dangling | ChainStop::Cycle => {}
             }
         }
         self.warn(
@@ -1778,6 +1802,11 @@ impl Importer {
             ),
             None,
         );
+        self.fallback_rungs(entry)
+    }
+
+    /// Ascending rung order inside the section's bounds, or every rung file.
+    fn fallback_rungs(&self, entry: &RawSection) -> Vec<u32> {
         if entry.first_rung >= 0 && entry.last_rung >= 0 {
             let low = entry.first_rung.min(entry.last_rung);
             let high = entry.first_rung.max(entry.last_rung);
@@ -1792,6 +1821,14 @@ impl Importer {
             }
         }
         self.links.keys().copied().collect()
+    }
+
+    /// Whether the walked prefix already covers every rung file the fallback
+    /// would run, so a dangling tail pointer left nothing behind.
+    fn covers_fallback(&self, rungs: &[u32], entry: &RawSection) -> bool {
+        let walked: BTreeSet<u32> = rungs.iter().copied().collect();
+        let fallback: BTreeSet<u32> = self.fallback_rungs(entry).into_iter().collect();
+        !fallback.is_empty() && walked == fallback
     }
 
     /// Rewrites jump coils from reference rung indices to section positions.
