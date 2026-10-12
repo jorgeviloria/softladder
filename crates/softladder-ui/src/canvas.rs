@@ -2168,9 +2168,11 @@ fn context_menu(
 /// Scrolls between networks with the wheel, zooms around the pointer with
 /// `Ctrl/Cmd` held.
 ///
-/// The plain wheel pans vertically (sideways with `Shift`), like a document:
-/// zooming on every wheel tick made the ladder unpleasant to read, so the zoom
-/// now lives behind the modifier, the ribbon buttons and the shortcuts.
+/// The plain wheel moves vertically, like a document: zooming on every wheel
+/// tick made the ladder unpleasant to read, so the zoom now lives behind the
+/// modifier, the ribbon buttons and the shortcuts. There is no sideways drift:
+/// trackpads report a horizontal component on almost every vertical scroll, so
+/// only an explicit `Shift` + wheel moves sideways.
 fn handle_wheel(app: &mut EditorApp, ui: &egui::Ui, response: &egui::Response, paper: Rect) {
     if !response.hovered() {
         return;
@@ -2186,12 +2188,11 @@ fn handle_wheel(app: &mut EditorApp, ui: &egui::Ui, response: &egui::Response, p
         return;
     }
     if !zoom {
-        let sideways = if sideways {
-            Vec2::new(delta.y, 0.0)
-        } else {
-            Vec2::new(delta.x, delta.y)
-        };
-        app.camera.pan_by(sideways);
+        if sideways {
+            app.camera.pan_by(Vec2::new(delta.y, 0.0));
+        } else if delta.y != 0.0 {
+            app.camera.pan_by(Vec2::new(0.0, delta.y));
+        }
         return;
     }
     let scroll = delta.y;

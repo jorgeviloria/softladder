@@ -49,6 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   well-deserved `SL-W001`), and the `.sltest` example pulses `%I1` five times asserting
   `%C0.V` 1–5 and `%C0.D`.
 
+## [Unreleased] — no sideways drift on the documents
+
+### Changed
+
+- **The wheel only moves along the sheet.** Trackpads report a horizontal component on almost
+  every vertical scroll, which drifted the ladder sideways under the pointer; raw horizontal
+  scroll is now ignored and only an explicit `Shift` + wheel moves sideways, on ladder and SFC.
+
 ## [Unreleased] — ladder scroll and honest block pins
 
 ### Changed

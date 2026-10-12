@@ -2098,7 +2098,8 @@ fn expression_tooltip(
 }
 
 /// Scrolls between pages with the wheel, zooms around the pointer with
-/// `Ctrl/Cmd` held — the same gesture language as the ladder document.
+/// `Ctrl/Cmd` held — the same gesture language as the ladder document, with
+/// the same lock against sideways trackpad drift.
 fn handle_wheel(app: &mut EditorApp, ui: &Ui, response: &egui::Response, paper: Rect) {
     if !response.hovered() {
         return;
@@ -2114,12 +2115,11 @@ fn handle_wheel(app: &mut EditorApp, ui: &Ui, response: &egui::Response, paper: 
         return;
     }
     if !zoom {
-        let sideways = if sideways {
-            Vec2::new(delta.y, 0.0)
-        } else {
-            Vec2::new(delta.x, delta.y)
-        };
-        app.camera.pan_by(sideways);
+        if sideways {
+            app.camera.pan_by(Vec2::new(delta.y, 0.0));
+        } else if delta.y != 0.0 {
+            app.camera.pan_by(Vec2::new(0.0, delta.y));
+        }
         return;
     }
     let scroll = delta.y;
