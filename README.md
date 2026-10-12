@@ -29,8 +29,8 @@ rebuilds everything around it:
 - **Editor** — a ladder document on paper, the way industrial tools draw one: numbered network
   headers with title, comment and state badge; tag names over addresses; real IEC symbols including
   timer and counter boxes with named pins; live power flow in green with inline values; a grouped
-  instruction palette; a project tree; a context-sensitive inspector; and unlimited command-based
-  undo/redo. See [`docs/UX.md`](docs/UX.md).
+  instruction palette; a project tree; a context-sensitive inspector; fixed or automatic per-rung
+  grids; and unlimited command-based undo/redo. See [`docs/UX.md`](docs/UX.md).
 - **Simulation bench** — a panel of switches, push-buttons, lamps, sliders and gauges that is part of
   the project, so you can commission the logic before touching hardware. The program's `%I`/`%Q`
   variables are wired to the bench automatically.
@@ -38,18 +38,20 @@ rebuilds everything around it:
   (`softladder test`). Your PLC program finally gets unit tests.
 - **Runtime** — deterministic fixed-step scan, scan statistics and jitter measurement, flight
   recorder with exact replay of an incident, fail-safe output policy, optional real-time priority.
-- **IO** — scriptable simulator, Modbus TCP master and slave over a configurable register map
-  (RTU framing codec-tested, serial line pending), Linux GPIO and LinuxCNC HAL stubs.
-- **Observability** — JSON/CBOR monitor protocol over TCP/WebSocket with tokens, TLS and roles, plus
-  a small web dashboard; alarms with severities, acknowledgement and a SQLite journal.
-- **Interoperability** — import and export ClassicLadder `.clp` / `.clprj` / `.clprjz` files.
+- **IO** — scriptable simulator, Modbus TCP master (also a polling scan driver) and slave over
+  a configurable register map (RTU framing codec-tested); serial line, Linux GPIO and the LinuxCNC
+  HAL bridge need hardware.
+- **Observability** — JSON monitor protocol over TCP plus an HTTP dashboard, bearer roles, alarms
+  with acknowledgement and an in-memory journal (WebSocket, TLS and SQLite pending).
+- **Interoperability** — import and export ClassicLadder `.clprj` / `.clprjz` containers, including
+  opening them straight in the editor.
 
 ## Status
 
-**M4 complete, M5 in progress.** The engine runs ladder *and* sequential function charts,
-ClassicLadder projects work in both languages, and both have an editor. The IO layer has a
-scriptable simulator and Modbus over a configurable map (TCP master/slave live, RTU framing
-codec-tested). What works today:
+**M4–M6 and M8 complete.** The engine runs ladder *and* sequential function charts,
+ClassicLadder projects work in both languages, and both have an editor. IO, the online monitor
+and logic testing are done except hardware-bound and nightly items (serial line, GPIO/HAL,
+WebSocket/TLS, libFuzzer); M7 and M9 remain. What works today:
 
 - **a real editor UI**, rebuilt against the industrial tools (TIA Portal, Studio 5000, CODESYS,
   TwinCAT, GX Works): a ribbon of command groups, a project tree, document tabs, a ladder document on
@@ -64,13 +66,18 @@ codec-tested). What works today:
   ladder, with steps as squares (the initial one marked, the active one filled green with its time),
   transitions carrying their condition, links derived from the model, the IEC double bar for AND
   junctions, and every chart edit an undoable command ([`docs/UX.md`](docs/UX.md) §12);
-- **IO, in progress** — the simulator plays deterministic input timelines (`SimScript`) behind the
-  future `.sltest` harness; a blocking Modbus TCP master (timeout + retries) and an in-memory
-  slave serve the configurable map (`I16`/`U16`/`F32`, scale, offset, word order), the master
-  doubles as a polling scan driver (`ModbusMasterDriver`), and the RTU
-  framing codec is tested. Serial line, GPIO and HAL are still stubs;
+- **IO** — the simulator plays deterministic input timelines (`SimScript`); a blocking Modbus TCP
+  master (timeout + retries) and an in-memory slave serve the configurable map (`I16`/`U16`/`F32`,
+  scale, offset, word order), the master doubles as a polling scan driver (`ModbusMasterDriver`),
+  and the RTU framing codec is tested. Serial line, GPIO and HAL need hardware;
+- **online monitor** — a line-delimited JSON protocol over TCP plus an HTTP dashboard, bearer roles
+  (`viewer`/`operator`/`engineer`), an audited session per connection, and an alarm journal with
+  acknowledgement fed by every scan; `softladder serve` scans while serving both;
+- **logic testing** — `.sltest` scenarios (hand-written timelines and assertions) run with
+  `softladder test` in CI, runs record and exactly replay, and every input format is fuzzed;
 - **ClassicLadder import and export**, validated against all 41 upstream example projects
-  ([`docs/COMPAT.md`](docs/COMPAT.md), [`testdata/known-divergences.md`](testdata/known-divergences.md));
+  ([`docs/COMPAT.md`](docs/COMPAT.md), [`testdata/known-divergences.md`](testdata/known-divergences.md)),
+  with containers opening straight in the editor;
 - `.slprj` schema v2 with a migration chain from v1, and reproducible headless runs
   (`softladder run` is deterministic by default).
 
@@ -84,10 +91,10 @@ There are no display servers in CI, so the interface is reviewed with headless s
 | M2 ✅ | egui editor: element palette, undo/redo, simulation bench, problems, live power flow |
 | M3 ✅ | ClassicLadder import/export + golden-corpus round trip |
 | M4 ✅ | SFC/Grafcet: engine, `sequential.csv` interoperability and editor |
-| M5 | IO: scriptable sim, configurable Modbus map, TCP master/slave and RTU framing done; serial line, GPIO (in progress) |
-| M6 | Online monitor (TCP + dashboard MVP live), alarms and journal; WS/TLS pending |
+| M5 ✅ | IO: scriptable sim, configurable Modbus map, TCP master/slave (+ scan driver), RTU framing; serial line, GPIO need hardware |
+| M6 ✅ | Online monitor (TCP + dashboard live), roles, alarms and journal with ack, `serve`; WS/TLS pending |
 | M7 | Physical IO (GPIO) + LinuxCNC HAL bridge |
-| M8 | `.sltest` + `softladder test` + replay + input fuzzing done; user docs pending |
+| M8 ✅ | `.sltest` + `softladder test` + replay + input fuzzing + user guide; libFuzzer nightly pending |
 | M9 | Extras: ST/IL/FBD, PID/PWM, PLCopen XML, WASM, packaging |
 
 See [`docs/PLAN.md`](docs/PLAN.md) (Spanish) for the full plan, milestones and acceptance criteria.
@@ -114,7 +121,7 @@ cargo test -p softladder-ui --test ui_shots    # writes target/ui-shots/*.png
 ```bash
 # prerequisites: Rust stable (see rust-toolchain.toml)
 
-cargo test --workspace            # unit tests (570+ tests)
+cargo test --workspace            # unit tests (630+ tests)
 cargo run -p softladder-ui        # desktop editor (run it from the repo root)
 cargo run -p softladder-cli -- run examples/traffic_light.slprj --cycles 500   # deterministic
 cargo run -p softladder-cli -- test examples/traffic_light.slprj examples/traffic_light.sltest
